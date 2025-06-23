@@ -1,9 +1,9 @@
-langchain==0.1.20
-langchain-community==0.0.38
-langchain-openai==0.1.7
-openai==1.30.1
+lalangchain==0.0.320
+langchain-community==0.0.23
+langchain-openai==0.0.8
+openai==1.10.0
 tiktoken==0.5.2
-chromadb==0.4.24
+chromadb==0.4.21
 pydantic==1.10.13
 Flask==2.3.3
 python-dotenv==1.0.1
