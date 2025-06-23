@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: mbti-advisor
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: LINE_WEBHOOK_URL
+        sync: false
