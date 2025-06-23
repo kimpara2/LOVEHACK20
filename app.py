@@ -201,9 +201,11 @@ def ask():
         return "", 204
 
     history = get_recent_history(user_id)
-    qa_chain, llm = get_qa_chain(profile)
 
     try:
+        # 🧠 重い処理をここに移動！
+        qa_chain, llm = get_qa_chain(profile)
+
         answer = qa_chain.run(question)
         if any(x in answer for x in ["申し訳", "お答えできません", "確認できません"]):
             prompt = (
@@ -222,6 +224,7 @@ def ask():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # 💰 Stripe Webhook
 @app.route("/stripe_webhook", methods=["POST"])
@@ -254,4 +257,3 @@ def stripe_webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
