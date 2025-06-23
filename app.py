@@ -12,6 +12,7 @@ import stripe
 import requests
 import zipfile
 import json
+from functools import lru_cache
 
 app = Flask(__name__)
 
@@ -37,6 +38,7 @@ MBTI_NICKNAME = {
 
 # 🧠 ベクトルDBを構成
 VECTOR_BASE = "./chroma_db"
+embedding = OpenAIEmbeddings(openai_api_key=openai_api_key)
 
 # 💾 SQLite初期化
 
@@ -74,6 +76,10 @@ init_db()
 
 # 📦 ベクトルDB読み込み関数
 
+@lru_cache(maxsize=64)
+def load_retriever(path: str):
+    return Chroma(persist_directory=path, embedding_function=embedding).as_retriever()
+
 def get_retrievers(user_profile):
     sub_paths = [
         f"self/{user_profile['mbti']}",
@@ -82,14 +88,12 @@ def get_retrievers(user_profile):
         "common"
     ]
 
-    embedding = OpenAIEmbeddings(openai_api_key=openai_api_key)
     retrievers = []
 
     for sub in sub_paths:
         path = os.path.join(VECTOR_BASE, sub)
         if os.path.exists(path):
-            vs = Chroma(persist_directory=path, embedding_function=embedding)
-            retrievers.append(vs.as_retriever())
+            retrievers.append(load_retriever(path))
 
     return retrievers
 
@@ -203,7 +207,6 @@ def ask():
     history = get_recent_history(user_id)
 
     try:
-        # 🧠 重い処理をここに移動！
         qa_chain, llm = get_qa_chain(profile)
 
         answer = qa_chain.run(question)
