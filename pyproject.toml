@@ -1,0 +1,55 @@
+[tool.poetry]
+name = "lovehack"
+version = "0.1.0"
+description = ""
+authors = ["Yuki Kimpara <kimpara.yuu@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+flask = "3.1.1"
+stripe = "12.2.0"
+requests = "2.32.4"
+openai = "1.30.5"
+langchain = "0.1.17"
+langchain-openai = "0.1.7"
+chromadb = "0.4.22"
+tiktoken = "0.7.0"
+python-dotenv = "1.0.1"
+gunicorn = "21.2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Yuki kimpara<kimpara.yuu@gmail.com
