@@ -1,8 +1,9 @@
+
 # -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify
-from langchain.vectorstores import Chroma
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.chat_models import ChatOpenAI
 from langchain.chains import RetrievalQA
 import os
 from dotenv import load_dotenv
@@ -32,8 +33,21 @@ with open("mbti_advice.json", "r", encoding="utf-8") as f:
 
 MBTI_NICKNAME = {
     "INTJ": "静かなる愛の地雷処理班",
+    "INTP": "こじらせ知能型ラブロボ",
+    "ENTJ": "恋も主導権ガチ勢",
     "ENTP": "恋のジェットコースター",
-    # 必要に応じて他も追加
+    "INFJ": "重ためラブポエマー📜",
+    "INFP": "愛されたいモンスター🧸",
+    "ENFJ": "ご奉仕マネージャー📋",
+    "ENFP": "かまってフェニックス🔥",
+    "ISTJ": "恋愛ルールブック📘",
+    "ISFJ": "感情しみしみおでん🍢",
+    "ESTJ": "正論ぶん回し侍⚔️",
+    "ESFJ": "愛の押し売り百貨店🛍️",
+    "ISTP": "甘え方わからん星人🪐",
+    "ISFP": "ぬくもり中毒者🔥",
+    "ESTP": "勢い重視族📶",
+    "ESFP": "ハイテン・ラブ・ジェット🚀"
 }
 
 # 🧠 ベクトルDBを構成
@@ -161,11 +175,22 @@ def mbti_collect():
     if not user_id or len(answers) != 10:
         return jsonify({"error": "userIdと10個の回答が必要です"}), 400
 
+    score = {"E":0, "I":0, "S":0, "N":0, "T":0, "F":0, "J":0, "P":0}
+    mapping = [
+        ("E", "I"), ("F", "T"), ("S", "N"), ("J", "P"), ("J", "P"),
+        ("I", "E"), ("T", "F"), ("J", "P"), ("F", "T"), ("E", "I")
+    ]
+    for i, (yes_key, no_key) in enumerate(mapping):
+        if answers[i]:
+            score[yes_key] += 1
+        else:
+            score[no_key] += 1
+
     mbti = ""
-    mbti += "E" if answers[0] else "I"
-    mbti += "S" if answers[3] else "N"
-    mbti += "F" if answers[4] else "T"
-    mbti += "J" if answers[6] else "P"
+    mbti += "E" if score["E"] >= score["I"] else "I"
+    mbti += "S" if score["S"] >= score["N"] else "N"
+    mbti += "T" if score["T"] >= score["F"] else "F"
+    mbti += "J" if score["J"] >= score["P"] else "P"
 
     conn = sqlite3.connect("user_data.db")
     cursor = conn.cursor()
@@ -260,3 +285,4 @@ def stripe_webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
