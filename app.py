@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify
 from langchain_community.vectorstores import Chroma
@@ -33,21 +32,8 @@ with open("mbti_advice.json", "r", encoding="utf-8") as f:
 
 MBTI_NICKNAME = {
     "INTJ": "静かなる愛の地雷処理班",
-    "INTP": "こじらせ知能型ラブロボ",
-    "ENTJ": "恋も主導権ガチ勢",
     "ENTP": "恋のジェットコースター",
-    "INFJ": "重ためラブポエマー📜",
-    "INFP": "愛されたいモンスター🧸",
-    "ENFJ": "ご奉仕マネージャー📋",
-    "ENFP": "かまってフェニックス🔥",
-    "ISTJ": "恋愛ルールブック📘",
-    "ISFJ": "感情しみしみおでん🍢",
-    "ESTJ": "正論ぶん回し侍⚔️",
-    "ESFJ": "愛の押し売り百貨店🛍️",
-    "ISTP": "甘え方わからん星人🪐",
-    "ISFP": "ぬくもり中毒者🔥",
-    "ESTP": "勢い重視族📶",
-    "ESFP": "ハイテン・ラブ・ジェット🚀"
+    # 必要に応じて他も追加
 }
 
 # 🧠 ベクトルDBを構成
