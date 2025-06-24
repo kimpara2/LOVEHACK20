@@ -16,6 +16,14 @@ from functools import lru_cache
 
 app = Flask(__name__)
 
+def notify_gas_payment_success(user_id):
+    GAS_URL = os.getenv("GAS_NOTIFY_URL")  # .env に記述しておく
+    try:
+        res = requests.post(GAS_URL, json={"userId": user_id, "paid": True})
+        print("✅ GAS通知送信済み:", res.status_code, res.text)
+    except Exception as e:
+        print("❌ GAS通知エラー:", str(e))
+
 # 🔐 OpenAI・Stripe・LINE設定
 openai_api_key = os.getenv("OPENAI_API_KEY")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
@@ -263,8 +271,14 @@ def stripe_webhook():
             user_id = row[0]
             cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
             conn.commit()
+
+    # 🔔 LINEに詳細アドバイスを送信
             text = mbti_detailed_advice.get(get_user_profile(user_id)["mbti"], "準備中")
             send_line_notification(user_id, text)
+
+    # ✅ GASにも通知（← ここ追加！）
+            notify_gas_payment_success(user_id)
+
         conn.close()
 
     return "OK", 200
