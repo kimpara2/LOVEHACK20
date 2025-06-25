@@ -260,19 +260,23 @@ def stripe_webhook():
     except Exception as e:
         return "Webhook error", 400
 
-    if event["type"] == "invoice.payment_succeeded":
-        print("✅ Stripe決済成功を検知")
-        customer_id = event["data"]["object"]["customer"]
+    if event["type"] in ["invoice.payment_succeeded", "checkout.session.completed"]:
+    customer_id = event["data"]["object"].get("customer")
 
-        conn = sqlite3.connect("user_data.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id FROM stripe_customers WHERE customer_id=?", (customer_id,))
-        row = cursor.fetchone()
-        if row:
-            user_id = row[0]
-            print(f"📌 対応するuser_id発見: {user_id}")
-            cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
-            conn.commit()
+    conn = sqlite3.connect("user_data.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM stripe_customers WHERE customer_id=?", (customer_id,))
+    row = cursor.fetchone()
+    if row:
+        user_id = row[0]
+        cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
+        conn.commit()
+
+        text = mbti_detailed_advice.get(get_user_profile(user_id)["mbti"], "準備中")
+        send_line_notification(user_id, text)
+        notify_gas_payment_success(user_id)  # ←これがちゃんと動くようになる！
+    conn.close()
+
 
     # 🔔 LINEに詳細アドバイスを送信
             text = mbti_detailed_advice.get(get_user_profile(user_id)["mbti"], "準備中")
@@ -280,6 +284,9 @@ def stripe_webhook():
 
     # ✅ GASにも通知（← ここ追加！）
             notify_gas_payment_success(user_id)
+            print("受信イベントタイプ:", event["type"])
+
+
         else:
             print(f"⚠️ customer_id に紐づく user_id が見つかりません: {customer_id}")
 
