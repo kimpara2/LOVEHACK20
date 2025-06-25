@@ -267,32 +267,27 @@ def stripe_webhook():
         cursor = conn.cursor()
         cursor.execute("SELECT user_id FROM stripe_customers WHERE customer_id=?", (customer_id,))
         row = cursor.fetchone()
+
         if row:
             user_id = row[0]
             cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
             conn.commit()
 
-            text = mbti_detailed_advice.get(get_user_profile(user_id)["mbti"], "準備中")
-            send_line_notification(user_id, text)
-            notify_gas_payment_success(user_id)  # ←これがちゃんと動くようになる！
-        conn.close()
-
-
-    # 🔔 LINEに詳細アドバイスを送信
+            # 🔔 LINEに詳細アドバイスを送信
             text = mbti_detailed_advice.get(get_user_profile(user_id)["mbti"], "準備中")
             send_line_notification(user_id, text)
 
-    # ✅ GASにも通知（← ここ追加！）
+            # ✅ GASにも通知
             notify_gas_payment_success(user_id)
+
             print("受信イベントタイプ:", event["type"])
-
-
         else:
             print(f"⚠️ customer_id に紐づく user_id が見つかりません: {customer_id}")
 
         conn.close()
 
     return "OK", 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
