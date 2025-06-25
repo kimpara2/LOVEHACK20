@@ -197,6 +197,45 @@ def mbti_collect():
 
     return jsonify({"advice": "診断完了。詳細アドバイスは有料プランで見れるよ！"})
 
+@app.route("/create_checkout_session", methods=["POST"])
+def create_checkout_session():
+    data = request.get_json()
+    user_id = data.get("userId")
+
+    if not user_id:
+        return jsonify({"error": "userIdが必要です"}), 400
+
+    try:
+        # Stripeカスタマー作成
+        customer = stripe.Customer.create(
+            metadata={"user_id": user_id}
+        )
+
+        # customer_id と user_id を紐付けて保存
+        conn = sqlite3.connect("user_data.db")
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO stripe_customers (customer_id, user_id) VALUES (?, ?)", (customer.id, user_id))
+        conn.commit()
+        conn.close()
+
+        # Checkoutセッション作成
+        session = stripe.checkout.Session.create(
+            customer=customer.id,
+            payment_method_types=["card"],
+            line_items=[{
+                "price": os.getenv("STRIPE_PRICE_ID"),  # ← ここだけ事前に設定
+                "quantity": 1,
+            }],
+            mode="subscription",
+            success_url="https://lovehack20.onrender.com/success",
+            cancel_url="https://lovehack20.onrender.com/cancel"
+        )
+
+        return jsonify({"checkout_url": session.url})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # 🔍 MBTI詳細アドバイス
 @app.route("/mbti_detail", methods=["POST"])
 def mbti_detail():
