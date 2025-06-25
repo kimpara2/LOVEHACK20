@@ -257,6 +257,7 @@ def stripe_webhook():
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        print("🧾 Stripe イベントタイプ:", event["type"])
     except Exception as e:
         return "Webhook error", 400
 
