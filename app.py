@@ -328,6 +328,15 @@ def stripe_webhook():
 
     return "OK", 200
 
+# 成功・キャンセルページ
+@app.route("/success", methods=["GET"])
+def success_page():
+    return "<h1>決済が完了しました🎉 LINEに戻ってください！</h1>"
+
+@app.route("/cancel", methods=["GET"])
+def cancel_page():
+    return "<h1>決済をキャンセルしました。</h1>"
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
