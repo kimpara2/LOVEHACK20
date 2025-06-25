@@ -261,21 +261,21 @@ def stripe_webhook():
         return "Webhook error", 400
 
     if event["type"] in ["invoice.payment_succeeded", "checkout.session.completed"]:
-    customer_id = event["data"]["object"].get("customer")
+        customer_id = event["data"]["object"].get("customer")
 
-    conn = sqlite3.connect("user_data.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM stripe_customers WHERE customer_id=?", (customer_id,))
-    row = cursor.fetchone()
-    if row:
-        user_id = row[0]
-        cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
-        conn.commit()
+        conn = sqlite3.connect("user_data.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM stripe_customers WHERE customer_id=?", (customer_id,))
+        row = cursor.fetchone()
+        if row:
+            user_id = row[0]
+            cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
+            conn.commit()
 
-        text = mbti_detailed_advice.get(get_user_profile(user_id)["mbti"], "準備中")
-        send_line_notification(user_id, text)
-        notify_gas_payment_success(user_id)  # ←これがちゃんと動くようになる！
-    conn.close()
+            text = mbti_detailed_advice.get(get_user_profile(user_id)["mbti"], "準備中")
+            send_line_notification(user_id, text)
+            notify_gas_payment_success(user_id)  # ←これがちゃんと動くようになる！
+        conn.close()
 
 
     # 🔔 LINEに詳細アドバイスを送信
