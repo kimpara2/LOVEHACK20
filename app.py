@@ -261,6 +261,7 @@ def stripe_webhook():
         return "Webhook error", 400
 
     if event["type"] == "invoice.payment_succeeded":
+        print("✅ Stripe決済成功を検知")
         customer_id = event["data"]["object"]["customer"]
 
         conn = sqlite3.connect("user_data.db")
@@ -269,6 +270,7 @@ def stripe_webhook():
         row = cursor.fetchone()
         if row:
             user_id = row[0]
+            print(f"📌 対応するuser_id発見: {user_id}")
             cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
             conn.commit()
 
@@ -278,6 +280,8 @@ def stripe_webhook():
 
     # ✅ GASにも通知（← ここ追加！）
             notify_gas_payment_success(user_id)
+        else:
+            print(f"⚠️ customer_id に紐づく user_id が見つかりません: {customer_id}")
 
         conn.close()
 
