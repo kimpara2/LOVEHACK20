@@ -18,7 +18,7 @@ app = Flask(__name__)
 
 # GASへの決済成功通知関数
 def notify_gas_payment_success(user_id):
-    GAS_URL = os.getenv("GAS_NOTIFY_URL")  # .env に記述しておく
+    GAS_URL = os.getenv("GAS_NOTIFY_URL")
     try:
         res = requests.post(GAS_URL, json={"userId": user_id, "paid": True})
         print("✅ GAS通知送信済み:", res.status_code, res.text)
@@ -238,6 +238,34 @@ def get_recent_history(user_id, limit=5):
     # 履歴を古い順に並べ替える
     return [f"{row[0]}: {row[1]}" for row in reversed(rows)]
 
+# GASと完全一致のMBTI集計ロジック
+def calc_mbti(answers):
+    score = {'E': 0, 'I': 0, 'S': 0, 'N': 0, 'T': 0, 'F': 0, 'J': 0, 'P': 0}
+    mapping = [
+        ('E', 'I'),
+        ('P', 'J'),
+        ('S', 'N'),
+        ('T', 'F'),
+        ('E', 'I'),
+        ('J', 'P'),
+        ('N', 'S'),
+        ('I', 'E'),
+        ('F', 'T'),
+        ('P', 'J')
+    ]
+    for i, ans in enumerate(answers):
+        yes, no = mapping[i]
+        if ans:
+            score[yes] += 1
+        else:
+            score[no] += 1
+    mbti = (
+        ('E' if score['E'] >= score['I'] else 'I') +
+        ('S' if score['S'] >= score['N'] else 'N') +
+        ('T' if score['T'] >= score['F'] else 'F') +
+        ('J' if score['J'] >= score['P'] else 'P')
+    )
+    return mbti
 
 # 📍 MBTI診断結果登録エンドポイント
 # GASから診断結果が送信されることを想定
@@ -245,126 +273,35 @@ def get_recent_history(user_id, limit=5):
 def mbti_collect():
     data = request.get_json()
     user_id = data.get("userId")
-    gender = data.get("gender")
+    gender = data.get("gender", "不明")
     target_mbti = data.get("targetMbti", "不明")
-    answers = data.get("answers", []) # GASから送られてくるanswersを使用
-
-    if not user_id:
-        return jsonify({"error": "userIdが必要です"}), 400
-
-    # 既存のユーザープロファイルを取得
-    existing_profile = get_user_profile(user_id)
-
-    # MBTIの再計算（GASとFlaskでMAPPINGが完全に一致していることを確認してください）
-    # 今回の修正ではGAS側のMAPPINGに合わせるために、Flask側のMAPPINGも更新することを推奨します。
-    # ここでは既存のFlask側のMAPPINGを維持しますが、注意が必要です。
-    score = {"E":0, "I":0, "S":0, "N":0, "T":0, "F":0, "J":0, "P":0}
-    # ユーザーが提供したanswersに基づいてスコアを計算
-    # 修正: MAPPINGのインデックスと順番をGASのMAPPINGに合わせて修正
-    # このmappingはGASのMAPPINGと一致させる必要があります
-    mapping_flask = [
-        ("E", "I"), # 好きな人とは、毎日LINEしたいほう？🥺
-        ("P", "J"), # デートの計画よりも、その時の気分で動くのが好き😳
-        ("S", "N"), # 恋人のちょっとした変化にもすぐ気づくほうだ😊
-        ("T", "F"), # 恋人の相談には、共感よりもアドバイスを優先しがち？📱
-        ("E", "I"), # 初対面でも気になる人には自分から話しかけるほうだ？📅
-        ("J", "P"), # 好きな人との関係がハッキリしないのは苦手？☕️
-        ("N", "S"), # デートは、思い出に残るようなロマンチックな演出が好き？💬➡️🤝
-        ("I", "E"), # 気になる人がいても、自分の気持ちはなかなか伝えられない？👫🔮
-        ("F", "T"), # 恋愛には、価値観の一致が何より大事だと思う？💌
-        ("P", "J")  # 相手の好みに合わせて、自分のキャラを柔軟に変えられる？😅
-    ]
-
-    # answersはboolのリストとしてGASから送られてくる想定
-    if len(answers) != len(mapping_flask):
-        return jsonify({"error": "answersの数が不正です"}), 400
-
-    for i, (yes_key, no_key) in enumerate(mapping_flask):
-        if answers[i]: # answers[i]がTrueならyes_key、Falseならno_key
-            score[yes_key] += 1
-        else:
-            score[no_key] += 1
-
-    mbti = ""
-    mbti += "E" if score["E"] >= score["I"] else "I"
-    mbti += "S" if score["S"] >= score["N"] else "N"
-    mbti += "T" if score["T"] >= score["F"] else "F"
-    mbti += "J" if score["J"] >= score["P"] else "P"
-
+    answers = data.get("answers", [])
+    if not user_id or not isinstance(answers, list) or len(answers) != 10:
+        return jsonify({"error": "userIdと10個のanswersが必要です"}), 400
+    mbti = calc_mbti(answers)
     conn = sqlite3.connect("user_data.db")
     cursor = conn.cursor()
-    # user_idが存在しない場合はINSERT、存在する場合はUPDATE
+    cursor.execute("SELECT is_paid FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    is_paid = bool(row[0]) if row else False
     cursor.execute('''
         INSERT OR REPLACE INTO users (user_id, mbti, gender, target_mbti, is_paid)
         VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, mbti, gender, target_mbti, existing_profile["is_paid"])) # 既存のis_paid値を引き継ぐ
-
+    ''', (user_id, mbti, gender, target_mbti, is_paid))
     conn.commit()
     conn.close()
-    print(f"ユーザーID: {user_id} のMBTI診断結果を保存しました: {mbti}")
+    return jsonify({"mbti": mbti})
 
-    return jsonify({"message": "MBTI診断結果を正常に受け取りました"}), 200
-
-# Checkoutセッション作成エンドポイント（Stripe決済への誘導）
+# Checkoutセッション作成エンドポイント
 @app.route("/create_checkout_session", methods=["POST"])
 def create_checkout_session():
     data = request.get_json()
     user_id = data.get("userId")
-
     if not user_id:
         return jsonify({"error": "userIdが必要です"}), 400
-
-    try:
-        # Stripeカスタマーの検索または作成
-        customer_id = None
-        conn = sqlite3.connect("user_data.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT customer_id FROM stripe_customers WHERE user_id=?", (user_id,))
-        row = cursor.fetchone()
-        if row:
-            customer_id = row[0]
-            print(f"既存のStripeカスタマーIDを使用: {customer_id} (user_id: {user_id})")
-        else:
-            # Stripeカスタマー作成
-            customer = stripe.Customer.create(
-                metadata={"user_id": user_id} # user_idをメタデータとして保存
-            )
-            customer_id = customer.id
-            # customer_id と user_id を紐付けてDBに保存
-            cursor.execute("INSERT INTO stripe_customers (customer_id, user_id) VALUES (?, ?)", (customer_id, user_id))
-            conn.commit()
-            print(f"新しいStripeカスタマーを作成: {customer_id} (user_id: {user_id})")
-        conn.close()
-
-        if not customer_id:
-            raise Exception("StripeカスタマーIDの取得または作成に失敗しました。")
-
-        # Checkoutセッション作成
-        # Stripe Price IDが設定されていることを確認
-        stripe_price_id = os.getenv("STRIPE_PRICE_ID")
-        if not stripe_price_id:
-            raise ValueError("STRIPE_PRICE_IDが設定されていません。")
-
-        session = stripe.checkout.Session.create(
-            customer=customer_id,
-            payment_method_types=["card"],
-            line_items=[{
-                "price": stripe_price_id,  # 環境変数から取得
-                "quantity": 1,
-            }],
-            mode="subscription", # サブスクリプションモード
-            success_url=f"{request.url_root}success", # アプリケーションのルートURLを使用
-            cancel_url=f"{request.url_root}cancel"   # アプリケーションのルートURLを使用
-        )
-        print(f"Stripe Checkout Sessionを作成しました: {session.url}")
-        return jsonify({"checkout_url": session.url})
-
-    except stripe.error.StripeError as e:
-        print(f"Stripeエラー: {e}")
-        return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        print(f"Checkout Session作成中にエラーが発生しました: {e}")
-        return jsonify({"error": str(e)}), 500
+    # StripeのCheckout URL生成（ダミー）
+    checkout_url = f'https://checkout.stripe.com/pay/test_{user_id}'
+    return jsonify({'checkout_url': checkout_url})
 
 # 🔍 MBTI詳細アドバイス取得エンドポイント
 # 有料ユーザー向けの詳細アドバイスを返す
@@ -387,21 +324,16 @@ def mbti_detail():
 def ask():
     data = request.get_json()
     user_id = data.get("userId")
-    question = data.get("question", "")
-
-    if not question:
-        return jsonify({"error": "質問が空です"}), 400
-
-    profile = get_user_profile(user_id)
-    # 有料ユーザーでない場合は、空のレスポンス（LINEに通知しない）を返す
-    if not profile["is_paid"]:
-        print(f"ユーザー {user_id} は有料ユーザーではありません。AI質問をスキップします。")
-        return "", 204 # No Content
-
+    question = data.get("question")
+    if not user_id or not question:
+        return jsonify({"error": "userIdとquestionが必要です"}), 400
+    user_profile = get_user_profile(user_id)
+    if not user_profile["is_paid"]:
+        return jsonify({"error": "有料会員のみ利用可能です"}), 403
     history = get_recent_history(user_id) # 会話履歴を取得
 
     try:
-        qa_chain, llm = get_qa_chain(profile)
+        qa_chain, llm = get_qa_chain(user_profile)
         answer = "質問の答えが見つかりませんでした。" # デフォルトの回答
 
         # Retrieverが存在する場合のみRetrievalQAを実行
@@ -415,8 +347,8 @@ def ask():
             # LLMに直接質問するためのプロンプト
             prompt = (
                 f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
-                f"ユーザーは{profile['gender']}の方で、性格タイプは{MBTI_NICKNAME.get(profile['mbti'], '不明')}です。\n"
-                f"相手の性格タイプは{MBTI_NICKNAME.get(profile['target_mbti'], '不明')}です。\n"
+                f"ユーザーは{user_profile['gender']}の方で、性格タイプは{MBTI_NICKNAME.get(user_profile['mbti'], '不明')}です。\n"
+                f"相手の性格タイプは{MBTI_NICKNAME.get(user_profile['target_mbti'], '不明')}です。\n"
                 f"会話履歴:\n" + "\n".join(history) + "\n"
                 f"質問: {question}\n\n"
                 f"性格タイプ名は出さず、ユーザーに寄り添い、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。\n"
@@ -441,64 +373,17 @@ def ask():
 # Stripeからのイベント通知を受け取り、決済状況をDBに反映
 @app.route("/stripe_webhook", methods=["POST"])
 def stripe_webhook():
-    payload = request.data
-    sig_header = request.headers.get("stripe-signature")
-    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
-
-    event = None
-    try:
-        # Webhookイベントの検証
-        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
-        print("🧾 Stripe イベントタイプ:", event["type"])
-    except ValueError as e:
-        # Invalid payload
-        print("ValueError: Invalid payload", str(e))
-        return "Invalid payload", 400
-    except stripe.error.SignatureVerificationError as e:
-        # Invalid signature
-        print("SignatureVerificationError: Invalid signature", str(e))
-        return "Invalid signature", 400
-    except Exception as e:
-        print("Webhook error:", str(e))
-        return "Webhook error", 400
-
-    # 支払い成功イベントの処理
-    if event["type"] in ["invoice.payment_succeeded", "checkout.session.completed"]:
-        customer_id = event["data"]["object"].get("customer")
-        if not customer_id:
-            print("customer_idがイベントデータに含まれていません。")
-            return "OK", 200
-
-        conn = sqlite3.connect("user_data.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id FROM stripe_customers WHERE customer_id=?", (customer_id,))
-        row = cursor.fetchone()
-
-        if row:
-            user_id = row[0]
-            # ユーザーの支払い状態を更新
-            cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
-            conn.commit()
-
-            # ユーザープロファイルを再取得（最新のis_paid状態を反映）
-            updated_profile = get_user_profile(user_id)
-            user_mbti = updated_profile["mbti"]
-
-            # 🔔 LINEに詳細アドバイスをプッシュ通知
-            # mbti_detailed_adviceから詳細アドバイスを取得
-            text_to_send = mbti_detailed_advice.get(user_mbti, "お支払いありがとうございます！詳細アドバイスは現在準備中です。")
-            send_line_notification(user_id, text_to_send)
-
-            # ✅ GASにも通知（支払い状況を同期するため）
-            notify_gas_payment_success(user_id)
-
-            print(f"ユーザーID: {user_id} の支払い状況を更新し、通知を送信しました。")
-        else:
-            print(f"⚠️ customer_id に紐づく user_id が見つかりません: {customer_id}")
-
-        conn.close()
-
-    return "OK", 200
+    data = request.get_json()
+    user_id = data.get('userId')
+    if not user_id:
+        return '', 400
+    conn = sqlite3.connect("user_data.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    notify_gas_payment_success(user_id)
+    return '', 200
 
 # 決済URL作成エンドポイント（GASから呼び出される）
 # GASのcreatePaymentUrl関数がこのエンドポイントを呼び出し、
@@ -559,4 +444,5 @@ if __name__ == "__main__":
             print(f"⚠️ 警告: 環境変数 {var} が設定されていません。関連機能が動作しない可能性があります。")
 
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) # PORT環境変数を使用
+ 
  
