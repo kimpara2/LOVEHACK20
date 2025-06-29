@@ -835,7 +835,7 @@ def complete_mbti_diagnosis(user_id, answers):
         result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
         
         # 決済誘導メッセージ
-        payment_message = ""──────────────\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n" + checkoutUrl + "\n──────────────""
+        payment_message = ""----------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n" + checkoutUrl + "\n----------------------""
         
         # GASに詳細アドバイス送信を依頼（課金後に送信される）
         send_detailed_advice_to_gas(user_id, mbti)
