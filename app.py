@@ -12,7 +12,6 @@ import stripe
 import requests
 import zipfile
 import json
-from functools import lru_cache
 import re
 
 app = Flask(__name__)
@@ -38,7 +37,6 @@ def send_detailed_advice_to_gas(user_id, mbti):
         return
     
     try:
-        # GASのgetDetailedAdvice関数を呼び出すためのリクエスト
         res = requests.post(GAS_URL, json={
             "action": "send_detailed_advice",
             "userId": user_id,
@@ -52,35 +50,32 @@ def send_detailed_advice_to_gas(user_id, mbti):
 openai_api_key = os.getenv("OPENAI_API_KEY")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 stripe_price_id = os.getenv("STRIPE_PRICE_ID")
-LINE_WEBHOOK_URL = os.getenv("LINE_WEBHOOK_URL")
+stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 # 🧳 chroma_db.zip を展開（初回起動時）
-# chroma_dbディレクトリが存在しない、かつchroma_db.zipが存在する場合に展開
 if not os.path.exists("./chroma_db") and os.path.exists("./chroma_db.zip"):
     print("chroma_db.zipを展開中...")
     with zipfile.ZipFile("./chroma_db.zip", 'r') as zip_ref:
-        zip_ref.extractall("./") # カレントディレクトリに展開
+        zip_ref.extractall("./")
     print("chroma_db.zipの展開が完了しました。")
 
 # 📖 MBTIアドバイス読み込み
-# mbti_advice.jsonが存在するか確認
 if not os.path.exists("mbti_advice.json"):
     print("エラー: mbti_advice.jsonが見つかりません。")
-    mbti_detailed_advice = {} # ファイルがない場合は空の辞書を設定
+    mbti_detailed_advice = {}
 else:
     with open("mbti_advice.json", "r", encoding="utf-8") as f:
         mbti_detailed_advice = json.load(f)
     print("mbti_advice.jsonを読み込みました。")
 
-
-# MBTIニックネームの定義 (GASと同期させることを推奨)
+# MBTIニックネームの定義
 MBTI_NICKNAME = {
     "INTJ": "静かなる愛の地雷処理班",
     "INTP": "こじらせ知能型ラブロボ",
     "ENTJ": "恋も主導権ガチ勢",
     "ENTP": "恋のジェットコースター",
     "INFJ": "重ためラブポエマー📜",
-    "INFP": "愛されたいモンスター ",
+    "INFP": "愛されたいモンスター🧸",
     "ENFJ": "ご奉仕マネージャー📋",
     "ENFP": "かまってフェニックス🔥",
     "ISTJ": "恋愛ルールブック📘",
@@ -93,22 +88,10 @@ MBTI_NICKNAME = {
     "ESFP": "ハイテン・ラブ・ジェット🚀"
 }
 
-# 🧠 ベクトルDBを構成
-VECTOR_BASE = "./chroma_db"
-# OpenAIEmbeddingsの初期化（APIキーが設定されていない場合はエラーになるので注意）
-try:
-    embedding = OpenAIEmbeddings(openai_api_key=openai_api_key)
-    print("OpenAIEmbeddingsを初期化しました。")
-except Exception as e:
-    print(f"OpenAIEmbeddingsの初期化に失敗しました: {e}")
-    embedding = None # エラー時はNoneを設定し、後続処理でハンドリング
-
-
 # 💾 SQLite初期化
 def init_db():
     conn = sqlite3.connect("user_data.db")
     cursor = conn.cursor()
-    # usersテーブルの作成
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
@@ -120,117 +103,11 @@ def init_db():
             mbti_answers TEXT DEFAULT '[]'
         )
     ''')
-    # stripe_customersテーブルの作成
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS stripe_customers (
-            customer_id TEXT PRIMARY KEY,
-            user_id TEXT
-        )
-    ''')
-    # messagesテーブルの作成（会話履歴保存用）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            role TEXT,
-            content TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
     conn.commit()
     conn.close()
     print("SQLiteデータベースを初期化しました。")
 
-init_db() # アプリケーション起動時にDBを初期化
-
-# 📦 ベクトルDB読み込み関数 (Lruキャッシュでパフォーマンス向上)
-@lru_cache(maxsize=64)
-def load_retriever(path: str):
-    if embedding is None:
-        raise ValueError("Embedding function is not initialized. Cannot load retriever.")
-    if not os.path.exists(path):
-        print(f"警告: ベクトルDBのパスが見つかりません: {path}")
-        return None # パスが存在しない場合はNoneを返す
-    try:
-        return Chroma(persist_directory=path, embedding_function=embedding).as_retriever()
-    except Exception as e:
-        print(f"ベクトルDBの読み込みに失敗しました ({path}): {e}")
-        return None
-
-# ユーザープロファイルに基づいたRetrieverの取得
-def get_retrievers(user_profile):
-    sub_paths = []
-    # 自分のMBTIに基づくパス
-    if user_profile['mbti'] and user_profile['mbti'] != "不明":
-        sub_paths.append(f"self/{user_profile['mbti']}")
-    # 相手のMBTIに基づくパス
-    if user_profile['target_mbti'] and user_profile['target_mbti'] != "不明":
-        sub_paths.append(f"partner/{user_profile['target_mbti']}")
-    # 性別に基づくパス
-    if user_profile['gender'] and user_profile['gender'] != "不明":
-        sub_paths.append(user_profile['gender'])
-    # 共通パスは常に含める
-    sub_paths.append("common")
-
-    retrievers = []
-    for sub in sub_paths:
-        path = os.path.join(VECTOR_BASE, sub)
-        ret = load_retriever(path)
-        if ret:
-            retrievers.append(ret)
-    return retrievers
-
-# 🔄 複数Retrieverを結合（EnsembleRetrieverを使用）
-def get_qa_chain(user_profile):
-    from langchain.retrievers import EnsembleRetriever
-    retrievers = get_retrievers(user_profile)
-    if not retrievers:
-        # どのRetrieverも見つからなかった場合、エラーではなく、デフォルトのLLMを返すなどの対応も検討
-        print("警告: 該当するベクトルDBが見つかりません。デフォルトのLLMを使用します。")
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
-        return None, llm # Retrieverがない場合はqa_chainをNoneとして返す
-
-    # weightsは全てのRetrieverに均等に設定（必要に応じて調整）
-    weights = [1.0 / len(retrievers)] * len(retrievers)
-    combined = EnsembleRetriever(retrievers=retrievers, weights=weights)
-    llm = ChatOpenAI(openai_api_key=openai_api_key)
-    return RetrievalQA.from_chain_type(llm=llm, retriever=combined), llm
-
-# 📬 LINE通知（GASからHTTP POSTで呼び出される想定）
-# この関数はFlaskアプリケーション自体からLINEに直接通知を送るもので、
-# GASからLINEへのリプライとは異なります。
-def send_line_notification(user_id, message):
-    # LINE Messaging APIへの直接リクエスト
-    # FlaskからはWebhook URLではなく、Messaging APIのエンドポイントを叩く必要があります
-    # LINE Developersで発行したChannel Access Tokenが必要
-    LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-    if not LINE_CHANNEL_ACCESS_TOKEN:
-        print("エラー: LINE_CHANNEL_ACCESS_TOKENが設定されていません。LINE通知はスキップされます。")
-        return
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
-    }
-    payload = {
-        "to": user_id,
-        "messages": [
-            {
-                "type": "text",
-                "text": message
-            }
-        ]
-    }
-    try:
-        res = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload, timeout=5)
-        res.raise_for_status() # HTTPエラーがあれば例外を発生
-        print(f"LINEプッシュ通知成功: {res.status_code}")
-    except requests.exceptions.Timeout as e:
-        print("LINE通知タイムアウト:", str(e))
-    except requests.exceptions.RequestException as e:
-        print("LINE通知失敗:", str(e))
-
-# 💾 DB操作
+init_db()
 
 # ユーザープロファイルの取得
 def get_user_profile(user_id):
@@ -241,49 +118,32 @@ def get_user_profile(user_id):
     row = cursor.fetchone()
     conn.close()
     
+    if not row:
+        # ユーザーが存在しない場合は作成
+        conn = sqlite3.connect("user_data.db")
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+        conn.commit()
+        conn.close()
+        return None
+    
     profile = {
-        "mbti": row[0] if row and row[0] else "不明",
-        "gender": row[1] if row and row[1] else "不明",
-        "target_mbti": row[2] if row and row[2] else "不明",
-        "is_paid": bool(row[3]) if row else False,
-        "mode": row[4] if row and row[4] else ""
+        "mbti": row[0] if row[0] else "不明",
+        "gender": row[1] if row[1] else "不明",
+        "target_mbti": row[2] if row[2] else "不明",
+        "is_paid": bool(row[3]) if row[3] else False,
+        "mode": row[4] if row[4] else ""
     }
     
     print(f"User profile result: {profile}")
     return profile
 
-# メッセージ履歴の保存
-def save_message(user_id, role, content):
-    conn = sqlite3.connect("user_data.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO messages (user_id, role, content) VALUES (?, ?, ?)", (user_id, role, content))
-    conn.commit()
-    conn.close()
-
-# 最新の会話履歴の取得
-def get_recent_history(user_id, limit=5):
-    conn = sqlite3.connect("user_data.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT role, content FROM messages WHERE user_id=? ORDER BY timestamp DESC LIMIT ?", (user_id, limit))
-    rows = cursor.fetchall()
-    conn.close()
-    # 履歴を古い順に並べ替える
-    return [f"{row[0]}: {row[1]}" for row in reversed(rows)]
-
-# GASと完全一致のMBTI集計ロジック
+# MBTI集計ロジック
 def calc_mbti(answers):
     score = {'E': 0, 'I': 0, 'S': 0, 'N': 0, 'T': 0, 'F': 0, 'J': 0, 'P': 0}
     mapping = [
-        ('E', 'I'),
-        ('P', 'J'),
-        ('S', 'N'),
-        ('T', 'F'),
-        ('E', 'I'),
-        ('J', 'P'),
-        ('N', 'S'),
-        ('I', 'E'),
-        ('F', 'T'),
-        ('P', 'J')
+        ('E', 'I'), ('P', 'J'), ('S', 'N'), ('T', 'F'), ('E', 'I'),
+        ('J', 'P'), ('N', 'S'), ('I', 'E'), ('F', 'T'), ('P', 'J')
     ]
     for i, ans in enumerate(answers):
         yes, no = mapping[i]
@@ -298,485 +158,6 @@ def calc_mbti(answers):
         ('J' if score['J'] >= score['P'] else 'P')
     )
     return mbti
-
-# 📍 MBTI診断結果登録エンドポイント
-# GASから診断結果が送信されることを想定
-@app.route("/mbti_collect", methods=["POST"])
-def mbti_collect():
-    data = request.get_json()
-    user_id = data.get("userId")
-    gender = data.get("gender", "不明")
-    target_mbti = data.get("targetMbti", "不明")
-    answers = data.get("answers", [])
-    if not user_id or not isinstance(answers, list) or len(answers) != 10:
-        return jsonify({"error": "userIdと10個のanswersが必要です"}), 400
-    mbti = calc_mbti(answers)
-    conn = sqlite3.connect("user_data.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT is_paid FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-    is_paid = bool(row[0]) if row else False
-    cursor.execute('''
-        INSERT OR REPLACE INTO users (user_id, mbti, gender, target_mbti, is_paid, mode)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (user_id, mbti, gender, target_mbti, is_paid, ""))
-    conn.commit()
-    conn.close()
-    return jsonify({"mbti": mbti})
-
-# Checkoutセッション作成エンドポイント
-@app.route("/create_checkout_session", methods=["POST"])
-def create_checkout_session():
-    data = request.get_json()
-    user_id = data.get("userId")
-    if not user_id:
-        return jsonify({"error": "userIdが必要です"}), 400
-
-    # デバッグ用ログ
-    print(f"DEBUG: stripe_price_id = {stripe_price_id}")
-    print(f"DEBUG: stripe.api_key = {'SET' if stripe.api_key else 'NOT SET'}")
-    
-    # 一時的にデフォルト値を設定（テスト用）
-    price_id = stripe_price_id or "price_1RYfUgGEUGCv0Pohu7xYJzlJ"
-    
-    if not price_id:
-        return jsonify({"error": "Stripe Price IDが設定されていません"}), 500
-    
-    try:
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                "price": price_id,
-                "quantity": 1,
-            }],
-            mode="payment",
-            success_url="https://lovehack20.onrender.com/success",
-            cancel_url="https://lovehack20.onrender.com/cancel",
-            metadata={"userId": user_id}
-        )
-        print(f"DEBUG: Created session URL = {session.url}")
-        return jsonify({"checkout_url": session.url})
-    except Exception as e:
-        print(f"DEBUG: Stripe error = {str(e)}")
-        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
-
-# 🔍 MBTI詳細アドバイス取得エンドポイント
-# 有料ユーザー向けの詳細アドバイスを返す
-@app.route("/mbti_detail", methods=["POST"])
-def mbti_detail():
-    data = request.get_json()
-    user_id = data.get("userId")
-    if not user_id:
-        return jsonify({"error": "userIdが必要です"}), 400
-
-    profile = get_user_profile(user_id)
-    if not profile["is_paid"]:
-        return jsonify({"error": "この機能は有料ユーザー限定です。"}), 403
-
-    advice = mbti_detailed_advice.get(profile["mbti"], "詳細アドバイスは現在準備中です。")
-    return jsonify({"detailed_advice": advice})
-
-# ❓ 質問受付エンドポイント（AI相談機能）
-@app.route("/ask", methods=["POST"])
-def ask():
-    data = request.get_json()
-    user_id = data.get("userId")
-    question = data.get("question")
-    if not user_id or not question:
-        return jsonify({"error": "userIdとquestionが必要です"}), 400
-    user_profile = get_user_profile(user_id)
-    if not user_profile["is_paid"]:
-        return jsonify({"error": "有料会員のみ利用可能です"}), 403
-    history = get_recent_history(user_id) # 会話履歴を取得
-
-    try:
-        qa_chain, llm = get_qa_chain(user_profile)
-        answer = "質問の答えが見つかりませんでした。" # デフォルトの回答
-
-        # Retrieverが存在する場合のみRetrievalQAを実行
-        if qa_chain:
-            qa_result = qa_chain.invoke({"query": question})
-            answer = qa_result.get("result", answer)
-            print(f"RetrievalQAの回答: {answer}")
-
-        # 回答が不十分な場合や特定のキーワードが含まれる場合にLLMに直接質問
-        if not qa_chain or any(x in answer for x in ["申し訳", "お答えできません", "確認できません", "見つかりません", "提供できません"]):
-            # LLMに直接質問するためのプロンプト
-            prompt = (
-                f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
-                f"ユーザーは{user_profile['gender']}の方で、性格タイプは{MBTI_NICKNAME.get(user_profile['mbti'], '不明')}です。\n"
-                f"相手の性格タイプは{MBTI_NICKNAME.get(user_profile['target_mbti'], '不明')}です。\n"
-                f"会話履歴:\n" + "\n".join(history) + "\n"
-                f"質問: {question}\n\n"
-                f"性格タイプ名は出さず、ユーザーに寄り添い、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。\n"
-                f"ただし、ユーザーの性別や相手のMBTIタイプを踏まえた上で回答してください。"
-            )
-            print("RetrievalQAの回答が不十分だったため、LLMに直接質問します。")
-            llm_response = llm.invoke(prompt)
-            answer = llm_response.content if llm_response.content else answer
-            print(f"LLM直接回答: {answer}")
-
-
-        save_message(user_id, "user", question)
-        save_message(user_id, "bot", answer)
-        return jsonify({"answer": answer})
-
-    except Exception as e:
-        print(f"AI質問処理中にエラーが発生しました: {e}")
-        return jsonify({"error": "AIの応答中にエラーが発生しました。時間を置いて再度お試しください。"}), 500
-
-
-# 💰 Stripe Webhookエンドポイント
-# Stripeからのイベント通知を受け取り、決済状況をDBに反映
-@app.route("/stripe_webhook", methods=["POST"])
-def stripe_webhook():
-    data = request.get_json()
-    user_id = data.get('userId')
-    if not user_id:
-        return '', 400
-    
-    try:
-        conn = sqlite3.connect("user_data.db")
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
-        
-        # 課金完了通知をGASに送信
-        notify_gas_payment_success(user_id)
-        
-        # ユーザーのMBTIを取得して詳細アドバイスを送信
-        user_profile = get_user_profile(user_id)
-        if user_profile and user_profile.get("mbti"):
-            send_detailed_advice_to_gas(user_id, user_profile["mbti"])
-            print(f"✅ 課金完了: ユーザー{user_id}の詳細アドバイスを送信しました（MBTI: {user_profile['mbti']}）")
-        else:
-            print(f"⚠️ 課金完了: ユーザー{user_id}のMBTIが見つかりませんでした")
-        
-        return '', 200
-    except Exception as e:
-        print(f"Stripe webhook処理エラー: {e}")
-        return '', 500
-
-# 決済URL作成エンドポイント（GASから呼び出される）
-# GASのcreatePaymentUrl関数がこのエンドポイントを呼び出し、
-# ユーザーをStripeのCheckoutページにリダイレクトさせるURLを返す
-@app.route("/create_payment_url", methods=["POST"])
-def create_payment_url():
-    try:
-        data = request.get_json()
-        print(f"DEBUG: create_payment_url received data: {data}")
-        
-        user_id = data.get("userId")
-        print(f"DEBUG: userId extracted: {user_id}")
-
-        if not user_id:
-            print("ERROR: userId is missing or empty")
-            return jsonify({"error": "userIdが必要です"}), 400
-
-        # 環境変数の確認
-        print(f"DEBUG: stripe.api_key = {'SET' if stripe.api_key else 'NOT SET'}")
-        print(f"DEBUG: stripe_price_id = {stripe_price_id}")
-        
-        # Stripe APIキーが設定されているか確認
-        if not stripe.api_key:
-            print("ERROR: Stripe API key is not set")
-            return jsonify({"error": "Stripe API key is not configured"}), 500
-
-        # 直接Stripeのチェックアウトセッションを作成
-        price_id = stripe_price_id or "price_1RYfUgGEUGCv0Pohu7xYJzlJ"
-        print(f"DEBUG: Using price_id: {price_id}")
-        
-        if not price_id:
-            print("ERROR: No valid price ID found")
-            return jsonify({"error": "Stripe Price IDが設定されていません"}), 500
-        
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                "price": price_id,
-                "quantity": 1,
-            }],
-            mode="payment",
-            success_url="https://lovehack20.onrender.com/success",
-            cancel_url="https://lovehack20.onrender.com/cancel",
-            metadata={"userId": user_id}
-        )
-        
-        original_url = session.url
-        print(f"DEBUG: Original Stripe URL length: {len(original_url)}")
-        print(f"DEBUG: Original Stripe URL: {original_url}")
-        
-        # URL短縮を試行
-        try:
-            shortened_url = shorten_url(original_url)
-            print(f"DEBUG: Shortened URL length: {len(shortened_url)}")
-            print(f"DEBUG: Shortened URL: {shortened_url}")
-            final_url = shortened_url
-        except Exception as e:
-            print(f"WARNING: URL shortening failed: {str(e)}, using original URL")
-            final_url = original_url
-        
-        return jsonify({"url": final_url})
-        
-    except stripe.error.StripeError as e:
-        print(f"ERROR: Stripe API error: {str(e)}")
-        return jsonify({"error": f"Stripe API error: {str(e)}"}), 500
-    except Exception as e:
-        print(f"ERROR: Unexpected error in create_payment_url: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
-
-# URL短縮関数
-def shorten_url(long_url):
-    """URL短縮サービスを使用してURLを短縮する"""
-    try:
-        # TinyURL APIを使用（無料で利用可能）
-        response = requests.post(
-            "https://tinyurl.com/api-create.php",
-            data={"url": long_url},
-            timeout=10
-        )
-        if response.status_code == 200:
-            return response.text
-        else:
-            raise Exception(f"TinyURL API error: {response.status_code}")
-    except Exception as e:
-        print(f"URL shortening error: {str(e)}")
-        # 短縮に失敗した場合は元のURLを返す
-        return long_url
-
-# 成功ページ
-@app.route("/success", methods=["GET"])
-def success_page():
-    return "<h1>決済が完了しました🎉 LINEに戻ってください！</h1>"
-
-# キャンセルページ
-@app.route("/cancel", methods=["GET"])
-def cancel_page():
-    return "<h1>決済をキャンセルしました。</h1>"
-
-# ルートエンドポイント（ヘルスチェック用）
-@app.route("/", methods=["GET"])
-def root():
-    return jsonify({"status": "ok", "message": "LoveHack API is running"})
-
-# LINE Webhookエンドポイント（LINEプラットフォームからのPOSTリクエストを受け取る）
-@app.route("/webhook", methods=["POST"])
-def line_webhook():
-    try:
-        # LINEプラットフォームからのリクエストを受け取る
-        data = request.get_json()
-        print(f"LINE Webhook received: {data}")
-        
-        # LINE Webhookの検証（LINEプラットフォームからの検証リクエスト）
-        if 'events' not in data:
-            print("No events in data, returning 200")
-            return '', 200
-        
-        print(f"Processing {len(data['events'])} events")
-        
-        # イベントを処理
-        for event in data['events']:
-            print(f"Processing event: {event}")
-            
-            if event['type'] == 'message' and event['message']['type'] == 'text':
-                user_id = event['source']['userId']
-                user_message = event['message']['text'].strip()
-                reply_token = event['replyToken']
-                
-                print(f"User ID: {user_id}")
-                print(f"User message: {user_message}")
-                print(f"Reply token: {reply_token}")
-                
-                # ユーザープロファイルを取得
-                user_profile = get_user_profile(user_id)
-                print(f"User profile: {user_profile}")
-                
-                # メッセージ処理
-                response_message = process_user_message(user_id, user_message, user_profile)
-                print(f"Response message: {response_message}")
-                
-                # LINEにリプライを送信
-                send_line_reply(reply_token, response_message)
-            else:
-                print(f"Event type not handled: {event['type']}")
-        
-        return '', 200
-    except Exception as e:
-        print(f"LINE Webhook error: {e}")
-        import traceback
-        traceback.print_exc()
-        return '', 200  # エラーが発生しても200 OKを返す（LINEの要件）
-
-# ユーザーメッセージ処理関数
-def process_user_message(user_id, message, user_profile):
-    """ユーザーメッセージを処理して適切な応答を返す"""
-    
-    # 初回ユーザーの場合、自動的に診断開始
-    if not user_profile:
-        return start_mbti_diagnosis(user_id)
-    
-    # 性別登録モードの処理
-    if user_profile.get('mode') == 'register_gender':
-        if message in ['男', '女']:
-            # 性別を保存
-            conn = sqlite3.connect("user_data.db")
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET gender=? WHERE user_id=?", (message, user_id))
-            cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
-            conn.commit()
-            conn.close()
-            return f"性別【{message}】を登録したよ！"
-        else:
-            return "【男】か【女】で答えてね！"
-    
-    # 相手のMBTI登録モードの処理
-    if user_profile.get('mode') == 'register_partner_mbti':
-        if re.match(r'^[EI][NS][FT][JP]$', message.upper()):
-            mbti = message.upper()
-            conn = sqlite3.connect("user_data.db")
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET target_mbti=? WHERE user_id=?", (mbti, user_id))
-            cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
-            conn.commit()
-            conn.close()
-            return f"お相手のMBTI【{mbti}】を登録したよ！"
-        else:
-            return "正しいMBTI形式（例：INTJ、ENFP）で入力してね！"
-    
-    # MBTI診断モードの処理
-    if user_profile.get('mode') == 'mbti_diagnosis':
-        if message in ['はい', 'いいえ']:
-            return process_mbti_answer(user_id, message, user_profile)
-        else:
-            return "【はい】か【いいえ】で答えてね！"
-    
-    # 通常のメッセージ処理
-    if message == "診断開始":
-        return start_mbti_diagnosis(user_id)
-    
-    elif message == "性別登録":
-        conn = sqlite3.connect("user_data.db")
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
-        return "性別を教えてね！\n【男】か【女】で答えてください。"
-    
-    elif message == "相手MBTI登録":
-        conn = sqlite3.connect("user_data.db")
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
-        return "お相手のMBTIを教えてね！\n（例：INTJ、ENFP、ISFJなど）"
-    
-    elif message == "チャット相談":
-        if user_profile.get('is_paid'):
-            return "チャット相談を開始します！\n恋愛の悩みを何でも相談してくださいね✨"
-        else:
-            return "チャット相談は有料機能です。\nまずは診断を完了して、詳細アドバイスをご購入ください！"
-    
-    else:
-        # その他のメッセージはAIチャットで処理
-        if user_profile.get('is_paid'):
-            return process_ai_chat(user_id, message, user_profile)
-        else:
-            return "有料チャット相談をご利用いただくには、まず詳細アドバイスをご購入ください！"
-
-# LINEリプライ送信関数
-def send_line_reply(reply_token, message):
-    """LINEにリプライメッセージを送信"""
-    try:
-        print(f"Sending LINE reply with token: {reply_token}")
-        print(f"Message content: {message}")
-        
-        line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-        if not line_token:
-            print("⚠️ LINE_CHANNEL_ACCESS_TOKENが設定されていません")
-            return
-        
-        url = "https://api.line.me/v2/bot/message/reply"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {line_token}"
-        }
-        data = {
-            "replyToken": reply_token,
-            "messages": [{"type": "text", "text": message}]
-        }
-        
-        print(f"Sending request to LINE API: {url}")
-        response = requests.post(url, headers=headers, json=data)
-        print(f"LINEリプライ送信結果: {response.status_code}")
-        print(f"LINE API response: {response.text}")
-        
-    except Exception as e:
-        print(f"LINEリプライ送信エラー: {e}")
-        import traceback
-        traceback.print_exc()
-
-# AIチャット処理関数
-def process_ai_chat(user_id, message, user_profile):
-    """AIチャットの処理"""
-    try:
-        # 既存のask関数のロジックを使用
-        qa_chain, llm = get_qa_chain(user_profile)
-        
-        # 会話履歴を取得
-        history = get_recent_history(user_id, limit=5)
-        history_text = "\n".join(history) if history else ""
-        
-        # プロンプトを作成
-        prompt = (
-            f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
-            f"ユーザーは{user_profile.get('gender', '不明')}の方で、性格タイプは{MBTI_NICKNAME.get(user_profile.get('mbti', ''), '不明')}です。\n"
-            f"相手の性格タイプは{MBTI_NICKNAME.get(user_profile.get('target_mbti', ''), '不明')}です。\n"
-            f"会話履歴:\n{history_text}\n"
-            f"質問: {message}\n\n"
-            f"性格タイプ名は出さず、ユーザーに寄り添い、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。"
-        )
-        
-        # LLMに質問
-        if llm:
-            response = llm.invoke(prompt)
-            answer = response.content if response.content else "申し訳ありません。回答を生成できませんでした。"
-        else:
-            answer = "申し訳ありません。AIサービスが利用できません。"
-        
-        # 会話履歴を保存
-        save_message(user_id, "user", message)
-        save_message(user_id, "bot", answer)
-        
-        return answer
-        
-    except Exception as e:
-        print(f"AIチャット処理エラー: {e}")
-        return "申し訳ありません。エラーが発生しました。時間を置いて再度お試しください。"
-
-# LINE Messaging API Webhook（標準的なパス）
-@app.route("/messaging-api/webhook", methods=["POST"])
-def messaging_api_webhook():
-    try:
-        data = request.get_json()
-        print(f"LINE Messaging API Webhook received: {data}")
-        return '', 200
-    except Exception as e:
-        print(f"LINE Messaging API Webhook error: {e}")
-        return '', 200
-
-# テスト用エンドポイント（GASからのリクエスト確認用）
-@app.route("/test", methods=["POST"])
-def test_endpoint():
-    try:
-        data = request.get_json()
-        print(f"TEST: Received data: {data}")
-        return jsonify({"status": "success", "received_data": data})
-    except Exception as e:
-        print(f"TEST ERROR: {str(e)}")
-        return jsonify({"error": str(e)}), 500
 
 # MBTI診断開始関数
 def start_mbti_diagnosis(user_id):
@@ -799,9 +180,9 @@ def start_mbti_diagnosis(user_id):
     
     return first_question
 
-# MBTI質問送信関数
+# MBTI質問送信関数（ボタン式）
 def send_mbti_question(user_id, question_index):
-    """MBTI診断の質問を送信"""
+    """MBTI診断の質問を送信（ボタン式）"""
     questions = [
         "好きな人とは、毎日LINEしたいほう？🥺",
         "デートの計画よりも、その時の気分で動くのが好き😳",
@@ -809,8 +190,8 @@ def send_mbti_question(user_id, question_index):
         "恋人の相談には、共感よりもアドバイスを優先しがち？📱",
         "初対面でも気になる人には自分から話しかけるほうだ？📅",
         "好きな人との関係がハッキリしないのは苦手？☕️",
-        "デートは、思い出に残るようなロマンチックな演出が好き？💬➡️ ",
-        "気になる人がいても、自分の気持ちはなかなか伝えられない？👫🔮",
+        "デートは、思い出に残るようなロマンチックな演出が好き？💬",
+        "気になる人がいても、自分の気持ちはなかなか伝えられない？👫",
         "恋愛には、価値観の一致が何より大事だと思う？💌",
         "相手の好みに合わせて、自分のキャラを柔軟に変えられる？😅"
     ]
@@ -818,7 +199,30 @@ def send_mbti_question(user_id, question_index):
     if question_index >= len(questions):
         return "診断が完了しました！"
     
-    return f"質問{question_index + 1}/10\n\n{questions[question_index]}\n\n【はい】か【いいえ】で答えてね！"
+    # ボタンテンプレートを作成
+    template = {
+        "type": "template",
+        "altText": f"質問{question_index + 1}/10: {questions[question_index]}",
+        "template": {
+            "type": "buttons",
+            "title": f"質問{question_index + 1}/10",
+            "text": questions[question_index],
+            "actions": [
+                {
+                    "type": "postback",
+                    "label": "はい",
+                    "data": f"mbti_answer:yes:{question_index}"
+                },
+                {
+                    "type": "postback",
+                    "label": "いいえ",
+                    "data": f"mbti_answer:no:{question_index}"
+                }
+            ]
+        }
+    }
+    
+    return template
 
 # MBTI回答処理関数
 def process_mbti_answer(user_id, answer, user_profile):
@@ -872,7 +276,7 @@ def complete_mbti_diagnosis(user_id, answers):
         # 診断結果メッセージを作成（簡潔版）
         result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
         
-        # 決済誘導メッセージ
+        # 決済誘導メッセージ（従来のテキスト形式）
         payment_message = "----------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n----------------------"
         
         # GASに詳細アドバイス送信を依頼（課金後に送信される）
@@ -908,7 +312,227 @@ def get_mbti_description(mbti):
     
     return descriptions.get(mbti, f"{mbti}タイプのあなたは、独特な魅力を持った恋愛タイプです。")
 
-if __name__ == "__main__":
+# ユーザーメッセージ処理関数
+def process_user_message(user_id, message, user_profile):
+    """ユーザーメッセージを処理して適切な応答を返す"""
+    
+    # 初回ユーザーの場合、自動的に診断開始
+    if not user_profile:
+        return start_mbti_diagnosis(user_id)
+    
+    # 性別登録モードの処理
+    if user_profile.get('mode') == 'register_gender':
+        if message in ['男', '女']:
+            # 性別を保存
+            conn = sqlite3.connect("user_data.db")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET gender=? WHERE user_id=?", (message, user_id))
+            cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            return f"性別【{message}】を登録したよ！"
+        else:
+            return "【男】か【女】で答えてね！"
+    
+    # 相手のMBTI登録モードの処理
+    if user_profile.get('mode') == 'register_partner_mbti':
+        if re.match(r'^[EI][NS][FT][JP]$', message):
+            # 相手のMBTIを保存
+            conn = sqlite3.connect("user_data.db")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET target_mbti=? WHERE user_id=?", (message, user_id))
+            cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            return f"相手のMBTI【{message}】を登録したよ！"
+        else:
+            return "正しいMBTI形式（例：INTJ、ENFP）で答えてね！"
+    
+    # MBTI診断モードの処理
+    if user_profile.get('mode') == 'mbti_diagnosis':
+        if message in ['はい', 'いいえ']:
+            return process_mbti_answer(user_id, message, user_profile)
+        else:
+            return "【はい】か【いいえ】で答えてね！"
+    
+    # 通常のメッセージ処理
+    if message == "診断開始":
+        return start_mbti_diagnosis(user_id)
+    elif message == "性別登録":
+        # 性別登録モードに設定
+        conn = sqlite3.connect("user_data.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        return "性別を教えてね！【男】か【女】で答えてください。"
+    elif message == "相手MBTI登録":
+        # 相手MBTI登録モードに設定
+        conn = sqlite3.connect("user_data.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        return "相手のMBTIを教えてね！（例：INTJ、ENFP）"
+    else:
+        # AIチャット処理
+        return process_ai_chat(user_id, message, user_profile)
+
+# LINEリプライ送信関数
+def send_line_reply(reply_token, message):
+    """LINEにリプライメッセージを送信"""
+    try:
+        print(f"Sending LINE reply with token: {reply_token}")
+        print(f"Message content: {message}")
+        
+        line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+        if not line_token:
+            print("⚠️ LINE_CHANNEL_ACCESS_TOKENが設定されていません")
+            return
+        
+        url = "https://api.line.me/v2/bot/message/reply"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {line_token}"
+        }
+        
+        # メッセージが配列の場合は複数メッセージ
+        if isinstance(message, list):
+            data = {
+                "replyToken": reply_token,
+                "messages": message
+            }
+        # メッセージが辞書（テンプレート）の場合はそのまま使用
+        elif isinstance(message, dict):
+            data = {
+                "replyToken": reply_token,
+                "messages": [message]
+            }
+        else:
+            # 文字列の場合は通常のテキストメッセージ
+            data = {
+                "replyToken": reply_token,
+                "messages": [{"type": "text", "text": message}]
+            }
+        
+        print(f"Sending request to LINE API: {url}")
+        response = requests.post(url, headers=headers, json=data)
+        print(f"LINE API response status: {response.status_code}")
+        print(f"LINE API response: {response.text}")
+        
+        if response.status_code != 200:
+            print(f"⚠️ LINE API error: {response.status_code} - {response.text}")
+        
+    except Exception as e:
+        print(f"LINE送信エラー: {e}")
+
+# AIチャット処理関数
+def process_ai_chat(user_id, message, user_profile):
+    """AIチャット処理"""
+    try:
+        # 簡単な応答（実際はLangChainを使用）
+        if "こんにちは" in message or "hello" in message.lower():
+            return "こんにちは！恋愛の相談があるときはいつでも聞いてね💕"
+        elif "ありがとう" in message:
+            return "どういたしまして！他にも恋愛の悩みがあれば気軽に相談してね✨"
+        else:
+            return f"【{user_profile.get('mbti', '不明')}タイプ】のあなたへのアドバイス：\n{message}について詳しく教えてくれると、もっと具体的なアドバイスができるよ！"
+    except Exception as e:
+        print(f"AIチャット処理エラー: {e}")
+        return "申し訳ありません。エラーが発生しました。時間を置いて再度お試しください。"
+
+# LINE Webhookエンドポイント
+@app.route("/webhook", methods=["POST"])
+def line_webhook():
+    try:
+        # LINEプラットフォームからのリクエストを受け取る
+        data = request.get_json()
+        print(f"LINE Webhook received: {data}")
+        
+        # LINE Webhookの検証（LINEプラットフォームからの検証リクエスト）
+        if 'events' not in data:
+            print("No events in data, returning 200")
+            return '', 200
+        
+        print(f"Processing {len(data['events'])} events")
+        
+        # イベントを処理
+        for event in data['events']:
+            print(f"Processing event: {event}")
+            
+            # テキストメッセージの処理
+            if event['type'] == 'message' and event['message']['type'] == 'text':
+                user_id = event['source']['userId']
+                user_message = event['message']['text'].strip()
+                reply_token = event['replyToken']
+                
+                print(f"User ID: {user_id}")
+                print(f"User message: {user_message}")
+                
+                # ユーザープロファイルを取得
+                user_profile = get_user_profile(user_id)
+                print(f"User profile: {user_profile}")
+                
+                # メッセージを処理
+                response_message = process_user_message(user_id, user_message, user_profile)
+                print(f"Response message: {response_message}")
+                
+                # LINEにリプライを送信
+                send_line_reply(reply_token, response_message)
+            
+            # ボタンクリック（postback）の処理
+            elif event['type'] == 'postback':
+                user_id = event['source']['userId']
+                postback_data = event['postback']['data']
+                reply_token = event['replyToken']
+                
+                print(f"Postback from user_id: {user_id}")
+                print(f"Postback data: {postback_data}")
+                
+                # MBTI回答の処理
+                if postback_data.startswith('mbti_answer:'):
+                    parts = postback_data.split(':')
+                    if len(parts) == 3:
+                        answer = "はい" if parts[1] == "yes" else "いいえ"
+                        question_index = int(parts[2])
+                        
+                        # ユーザープロファイルを取得
+                        user_profile = get_user_profile(user_id)
+                        
+                        # MBTI回答を処理
+                        response_message = process_mbti_answer(user_id, answer, user_profile)
+                        print(f"MBTI response: {response_message}")
+                        
+                        # LINEにリプライを送信
+                        send_line_reply(reply_token, response_message)
+        
+        return '', 200
+        
+    except Exception as e:
+        print(f"LINE Webhook error: {e}")
+        return '', 200
+
+# 環境変数確認用エンドポイント
+@app.route("/env_test", methods=["GET"])
+def env_test():
+    """環境変数の設定状況を確認"""
+    env_vars = {
+        "OPENAI_API_KEY": "SET" if os.getenv("OPENAI_API_KEY") else "NOT SET",
+        "STRIPE_SECRET_KEY": "SET" if os.getenv("STRIPE_SECRET_KEY") else "NOT SET",
+        "STRIPE_PRICE_ID": "SET" if os.getenv("STRIPE_PRICE_ID") else "NOT SET",
+        "STRIPE_WEBHOOK_SECRET": "SET" if os.getenv("STRIPE_WEBHOOK_SECRET") else "NOT SET",
+        "LINE_CHANNEL_ACCESS_TOKEN": "SET" if os.getenv("LINE_CHANNEL_ACCESS_TOKEN") else "NOT SET",
+        "LINE_CHANNEL_SECRET": "SET" if os.getenv("LINE_CHANNEL_SECRET") else "NOT SET",
+        "GAS_NOTIFY_URL": "SET" if os.getenv("GAS_NOTIFY_URL") else "NOT SET"
+    }
+    return jsonify(env_vars)
+
+# ルートエンドポイント
+@app.route("/", methods=["GET"])
+def root():
+    return "LINE MBTI診断ボットが動作中です！"
+
+if __name__ == '__main__':
     # 環境変数が設定されているか確認
     print("=== 環境変数チェック ===")
     required_env_vars = ["OPENAI_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_PRICE_ID", "STRIPE_WEBHOOK_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"]
@@ -925,4 +549,4 @@ if __name__ == "__main__":
     print(f"GAS Notify URL: {os.getenv('GAS_NOTIFY_URL', 'NOT SET')}")
     print("========================")
 
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) # PORT環境変数を使用
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) 
