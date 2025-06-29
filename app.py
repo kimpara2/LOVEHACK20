@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify
 from langchain.vectorstores import Chroma
 from langchain.embeddings import OpenAIEmbeddings
@@ -233,19 +234,23 @@ def send_line_notification(user_id, message):
 
 # ユーザープロファイルの取得
 def get_user_profile(user_id):
+    print(f"Getting user profile for user_id: {user_id}")
     conn = sqlite3.connect("user_data.db")
     cursor = conn.cursor()
     cursor.execute("SELECT mbti, gender, target_mbti, is_paid, mode FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
     conn.close()
     
-    return {
+    profile = {
         "mbti": row[0] if row and row[0] else "不明",
         "gender": row[1] if row and row[1] else "不明",
         "target_mbti": row[2] if row and row[2] else "不明",
         "is_paid": bool(row[3]) if row else False,
         "mode": row[4] if row and row[4] else ""
     }
+    
+    print(f"User profile result: {profile}")
+    return profile
 
 # メッセージ履歴の保存
 def save_message(user_id, role, content):
@@ -567,34 +572,49 @@ def line_webhook():
         
         # LINE Webhookの検証（LINEプラットフォームからの検証リクエスト）
         if 'events' not in data:
+            print("No events in data, returning 200")
             return '', 200
+        
+        print(f"Processing {len(data['events'])} events")
         
         # イベントを処理
         for event in data['events']:
+            print(f"Processing event: {event}")
+            
             if event['type'] == 'message' and event['message']['type'] == 'text':
                 user_id = event['source']['userId']
                 user_message = event['message']['text'].strip()
                 reply_token = event['replyToken']
                 
+                print(f"User ID: {user_id}")
+                print(f"User message: {user_message}")
+                print(f"Reply token: {reply_token}")
+                
                 # ユーザープロファイルを取得
                 user_profile = get_user_profile(user_id)
+                print(f"User profile: {user_profile}")
                 
                 # メッセージ処理
                 response_message = process_user_message(user_id, user_message, user_profile)
+                print(f"Response message: {response_message}")
                 
                 # LINEにリプライを送信
                 send_line_reply(reply_token, response_message)
+            else:
+                print(f"Event type not handled: {event['type']}")
         
         return '', 200
     except Exception as e:
         print(f"LINE Webhook error: {e}")
+        import traceback
+        traceback.print_exc()
         return '', 200  # エラーが発生しても200 OKを返す（LINEの要件）
 
 # ユーザーメッセージ処理関数
 def process_user_message(user_id, message, user_profile):
     """ユーザーメッセージを処理して適切な応答を返す"""
-
-# 初回ユーザーの場合、自動的に診断開始
+    
+    # 初回ユーザーの場合、自動的に診断開始
     if not user_profile:
         return start_mbti_diagnosis(user_id)
     
@@ -670,6 +690,9 @@ def process_user_message(user_id, message, user_profile):
 def send_line_reply(reply_token, message):
     """LINEにリプライメッセージを送信"""
     try:
+        print(f"Sending LINE reply with token: {reply_token}")
+        print(f"Message content: {message}")
+        
         line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
         if not line_token:
             print("⚠️ LINE_CHANNEL_ACCESS_TOKENが設定されていません")
@@ -685,11 +708,15 @@ def send_line_reply(reply_token, message):
             "messages": [{"type": "text", "text": message}]
         }
         
+        print(f"Sending request to LINE API: {url}")
         response = requests.post(url, headers=headers, json=data)
         print(f"LINEリプライ送信結果: {response.status_code}")
+        print(f"LINE API response: {response.text}")
         
     except Exception as e:
         print(f"LINEリプライ送信エラー: {e}")
+        import traceback
+        traceback.print_exc()
 
 # AIチャット処理関数
 def process_ai_chat(user_id, message, user_profile):
@@ -754,6 +781,8 @@ def test_endpoint():
 # MBTI診断開始関数
 def start_mbti_diagnosis(user_id):
     """MBTI診断を開始する"""
+    print(f"Starting MBTI diagnosis for user_id: {user_id}")
+    
     # 診断状態を初期化
     conn = sqlite3.connect("user_data.db")
     cursor = conn.cursor()
@@ -762,8 +791,13 @@ def start_mbti_diagnosis(user_id):
     conn.commit()
     conn.close()
     
+    print(f"MBTI diagnosis mode set for user_id: {user_id}")
+    
     # 最初の質問を送信
-    return send_mbti_question(user_id, 0)
+    first_question = send_mbti_question(user_id, 0)
+    print(f"First question generated: {first_question}")
+    
+    return first_question
 
 # MBTI質問送信関数
 def send_mbti_question(user_id, question_index):
@@ -839,7 +873,7 @@ def complete_mbti_diagnosis(user_id, answers):
         result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
         
         # 決済誘導メッセージ
-        payment_message = "----------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n" + checkoutUrl + "\n----------------------"
+        payment_message = "----------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n----------------------"
         
         # GASに詳細アドバイス送信を依頼（課金後に送信される）
         send_detailed_advice_to_gas(user_id, mbti)
