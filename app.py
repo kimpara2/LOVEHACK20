@@ -13,6 +13,7 @@ import requests
 import zipfile
 import json
 from functools import lru_cache
+import re
 
 app = Flask(__name__)
 
@@ -114,7 +115,8 @@ def init_db():
             mbti TEXT,
             gender TEXT,
             target_mbti TEXT,
-            is_paid BOOLEAN DEFAULT 0
+            is_paid BOOLEAN DEFAULT 0,
+            mode TEXT DEFAULT ''
         )
     ''')
     # stripe_customersテーブルの作成
@@ -233,14 +235,15 @@ def send_line_notification(user_id, message):
 def get_user_profile(user_id):
     conn = sqlite3.connect("user_data.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT mbti, gender, target_mbti, is_paid FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT mbti, gender, target_mbti, is_paid, mode FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
     conn.close()
     return {
         "mbti": row[0] if row and row[0] else "不明", # Noneや空文字の場合も"不明"に
         "gender": row[1] if row and row[1] else "不明",
         "target_mbti": row[2] if row and row[2] else "不明",
-        "is_paid": bool(row[3]) if row else False
+        "is_paid": bool(row[3]) if row else False,
+        "mode": row[4] if row and row[4] else ""
     }
 
 # メッセージ履歴の保存
@@ -308,9 +311,9 @@ def mbti_collect():
     row = cursor.fetchone()
     is_paid = bool(row[0]) if row else False
     cursor.execute('''
-        INSERT OR REPLACE INTO users (user_id, mbti, gender, target_mbti, is_paid)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, mbti, gender, target_mbti, is_paid))
+        INSERT OR REPLACE INTO users (user_id, mbti, gender, target_mbti, is_paid, mode)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, mbti, gender, target_mbti, is_paid, ""))
     conn.commit()
     conn.close()
     return jsonify({"mbti": mbti})
@@ -561,25 +564,158 @@ def line_webhook():
         data = request.get_json()
         print(f"LINE Webhook received: {data}")
         
-        # ここでLINEからのメッセージを処理する
-        # 現在はGASがメッセージ処理を担当しているため、
-        # このエンドポイントは単純に200 OKを返すだけ
+        # LINE Webhookの検証（LINEプラットフォームからの検証リクエスト）
+        if 'events' not in data:
+            return '', 200
+        
+        # イベントを処理
+        for event in data['events']:
+            if event['type'] == 'message' and event['message']['type'] == 'text':
+                user_id = event['source']['userId']
+                user_message = event['message']['text'].strip()
+                reply_token = event['replyToken']
+                
+                # ユーザープロファイルを取得
+                user_profile = get_user_profile(user_id)
+                
+                # メッセージ処理
+                response_message = process_user_message(user_id, user_message, user_profile)
+                
+                # LINEにリプライを送信
+                send_line_reply(reply_token, response_message)
         
         return '', 200
     except Exception as e:
         print(f"LINE Webhook error: {e}")
         return '', 200  # エラーが発生しても200 OKを返す（LINEの要件）
 
-# LINE Webhookの代替パス（LINEプラットフォームが使用する可能性のあるパス）
-@app.route("/callback", methods=["POST"])
-def line_callback():
+# ユーザーメッセージ処理関数
+def process_user_message(user_id, message, user_profile):
+    """ユーザーメッセージを処理して適切な応答を返す"""
+    
+    # 性別登録モードの処理
+    if user_profile.get('mode') == 'register_gender':
+        if message in ['男', '女']:
+            # 性別を保存
+            conn = sqlite3.connect("user_data.db")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET gender=? WHERE user_id=?", (message, user_id))
+            cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            return f"性別【{message}】を登録したよ！"
+        else:
+            return "【男】か【女】で答えてね！"
+    
+    # 相手のMBTI登録モードの処理
+    if user_profile.get('mode') == 'register_partner_mbti':
+        if re.match(r'^[EI][NS][FT][JP]$', message.upper()):
+            mbti = message.upper()
+            conn = sqlite3.connect("user_data.db")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET target_mbti=? WHERE user_id=?", (mbti, user_id))
+            cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            return f"お相手のMBTI【{mbti}】を登録したよ！"
+        else:
+            return "正しいMBTI形式（例：INTJ、ENFP）で入力してね！"
+    
+    # 通常のメッセージ処理
+    if message == "診断開始":
+        return "MBTI診断を開始します！\n\nまずは性別を教えてね！\n【男】か【女】で答えてください。"
+    
+    elif message == "性別登録":
+        conn = sqlite3.connect("user_data.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        return "性別を教えてね！\n【男】か【女】で答えてください。"
+    
+    elif message == "相手MBTI登録":
+        conn = sqlite3.connect("user_data.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        return "お相手のMBTIを教えてね！\n（例：INTJ、ENFP、ISFJなど）"
+    
+    elif message == "チャット相談":
+        if user_profile.get('is_paid'):
+            return "チャット相談を開始します！\n恋愛の悩みを何でも相談してくださいね✨"
+        else:
+            return "チャット相談は有料機能です。\nまずは診断を完了して、詳細アドバイスをご購入ください！"
+    
+    else:
+        # その他のメッセージはAIチャットで処理
+        if user_profile.get('is_paid'):
+            return process_ai_chat(user_id, message, user_profile)
+        else:
+            return "有料チャット相談をご利用いただくには、まず詳細アドバイスをご購入ください！"
+
+# LINEリプライ送信関数
+def send_line_reply(reply_token, message):
+    """LINEにリプライメッセージを送信"""
     try:
-        data = request.get_json()
-        print(f"LINE Callback received: {data}")
-        return '', 200
+        line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+        if not line_token:
+            print("⚠️ LINE_CHANNEL_ACCESS_TOKENが設定されていません")
+            return
+        
+        url = "https://api.line.me/v2/bot/message/reply"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {line_token}"
+        }
+        data = {
+            "replyToken": reply_token,
+            "messages": [{"type": "text", "text": message}]
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        print(f"LINEリプライ送信結果: {response.status_code}")
+        
     except Exception as e:
-        print(f"LINE Callback error: {e}")
-        return '', 200
+        print(f"LINEリプライ送信エラー: {e}")
+
+# AIチャット処理関数
+def process_ai_chat(user_id, message, user_profile):
+    """AIチャットの処理"""
+    try:
+        # 既存のask関数のロジックを使用
+        qa_chain, llm = get_qa_chain(user_profile)
+        
+        # 会話履歴を取得
+        history = get_recent_history(user_id, limit=5)
+        history_text = "\n".join(history) if history else ""
+        
+        # プロンプトを作成
+        prompt = (
+            f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
+            f"ユーザーは{user_profile.get('gender', '不明')}の方で、性格タイプは{MBTI_NICKNAME.get(user_profile.get('mbti', ''), '不明')}です。\n"
+            f"相手の性格タイプは{MBTI_NICKNAME.get(user_profile.get('target_mbti', ''), '不明')}です。\n"
+            f"会話履歴:\n{history_text}\n"
+            f"質問: {message}\n\n"
+            f"性格タイプ名は出さず、ユーザーに寄り添い、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。"
+        )
+        
+        # LLMに質問
+        if llm:
+            response = llm.invoke(prompt)
+            answer = response.content if response.content else "申し訳ありません。回答を生成できませんでした。"
+        else:
+            answer = "申し訳ありません。AIサービスが利用できません。"
+        
+        # 会話履歴を保存
+        save_message(user_id, "user", message)
+        save_message(user_id, "bot", answer)
+        
+        return answer
+        
+    except Exception as e:
+        print(f"AIチャット処理エラー: {e}")
+        return "申し訳ありません。エラーが発生しました。時間を置いて再度お試しください。"
 
 # LINE Messaging API Webhook（標準的なパス）
 @app.route("/messaging-api/webhook", methods=["POST"])
@@ -606,7 +742,7 @@ def test_endpoint():
 if __name__ == "__main__":
     # 環境変数が設定されているか確認
     print("=== 環境変数チェック ===")
-    required_env_vars = ["OPENAI_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_PRICE_ID", "STRIPE_WEBHOOK_SECRET"]
+    required_env_vars = ["OPENAI_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_PRICE_ID", "STRIPE_WEBHOOK_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"]
     for var in required_env_vars:
         value = os.getenv(var)
         if not value:
@@ -621,6 +757,3 @@ if __name__ == "__main__":
     print("========================")
 
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) # PORT環境変数を使用
- 
- 
- 
