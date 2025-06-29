@@ -301,14 +301,21 @@ def create_checkout_session():
     if not user_id:
         return jsonify({"error": "userIdが必要です"}), 400
     
-    if not stripe_price_id:
+    # デバッグ用ログ
+    print(f"DEBUG: stripe_price_id = {stripe_price_id}")
+    print(f"DEBUG: stripe.api_key = {'SET' if stripe.api_key else 'NOT SET'}")
+    
+    # 一時的にデフォルト値を設定（テスト用）
+    price_id = stripe_price_id or "price_1RYfUgGEUGCv0Pohu7xYJzlJ"
+    
+    if not price_id:
         return jsonify({"error": "Stripe Price IDが設定されていません"}), 500
     
     try:
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             line_items=[{
-                "price": stripe_price_id,
+                "price": price_id,
                 "quantity": 1,
             }],
             mode="payment",
@@ -316,9 +323,11 @@ def create_checkout_session():
             cancel_url="https://lovehack20.onrender.com/cancel",
             metadata={"userId": user_id}
         )
+        print(f"DEBUG: Created session URL = {session.url}")
         return jsonify({"checkout_url": session.url})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"DEBUG: Stripe error = {str(e)}")
+        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
 
 # 🔍 MBTI詳細アドバイス取得エンドポイント
 # 有料ユーザー向けの詳細アドバイスを返す
