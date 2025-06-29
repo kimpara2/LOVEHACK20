@@ -19,6 +19,10 @@ app = Flask(__name__)
 # GASへの決済成功通知関数
 def notify_gas_payment_success(user_id):
     GAS_URL = os.getenv("GAS_NOTIFY_URL")
+    if not GAS_URL:
+        print("⚠️ GAS_NOTIFY_URLが設定されていません。通知をスキップします。")
+        return
+    
     try:
         res = requests.post(GAS_URL, json={"userId": user_id, "paid": True})
         print("✅ GAS通知送信済み:", res.status_code, res.text)
@@ -200,7 +204,7 @@ def send_line_notification(user_id, message):
         res = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload, timeout=5)
         res.raise_for_status() # HTTPエラーがあれば例外を発生
         print(f"LINEプッシュ通知成功: {res.status_code}")
-    except requests.exceptions.Timeout:
+    except requests.exceptions.Timeout as e:
         print("LINE通知タイムアウト:", str(e))
     except requests.exceptions.RequestException as e:
         print("LINE通知失敗:", str(e))
@@ -300,7 +304,7 @@ def create_checkout_session():
     user_id = data.get("userId")
     if not user_id:
         return jsonify({"error": "userIdが必要です"}), 400
-    
+
     # デバッグ用ログ
     print(f"DEBUG: stripe_price_id = {stripe_price_id}")
     print(f"DEBUG: stripe.api_key = {'SET' if stripe.api_key else 'NOT SET'}")
@@ -403,13 +407,18 @@ def stripe_webhook():
     user_id = data.get('userId')
     if not user_id:
         return '', 400
-    conn = sqlite3.connect("user_data.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
-    conn.commit()
-    conn.close()
-    notify_gas_payment_success(user_id)
-    return '', 200
+    
+    try:
+        conn = sqlite3.connect("user_data.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        notify_gas_payment_success(user_id)
+        return '', 200
+    except Exception as e:
+        print(f"Stripe webhook処理エラー: {e}")
+        return '', 500
 
 # 決済URL作成エンドポイント（GASから呼び出される）
 # GASのcreatePaymentUrl関数がこのエンドポイントを呼び出し、
@@ -417,20 +426,39 @@ def stripe_webhook():
 @app.route("/create_payment_url", methods=["POST"])
 def create_payment_url():
     data = request.get_json()
+    print(f"DEBUG: create_payment_url received data: {data}")
+    
     user_id = data.get("userId")
+    print(f"DEBUG: userId extracted: {user_id}")
 
     if not user_id:
+        print("ERROR: userId is missing or empty")
         return jsonify({"error": "userIdが必要です"}), 400
 
-    # FlaskアプリケーションのURLと、checkoutセッション作成エンドポイントを組み合わせて返す
-    # GAS側がこのURLをユーザーに提示し、ユーザーがブラウザで開くとStripeの決済ページに遷移する
-    checkout_session_url = f"{request.url_root}create_checkout_session" # 修正: create_checkout_sessionを呼び出す
-    print(f"create_payment_urlが呼び出されました。checkoutセッションURL: {checkout_session_url}")
-    return jsonify({
-        # 修正: ここで直接StripeのセッションURLを生成するのではなく、
-        # /create_checkout_sessionを呼び出すためのURLを返す
-        "url": f"{request.url_root}checkout?uid={user_id}" # このURLにアクセスするとcreate_checkout_sessionが呼び出されるようにする
-    })
+    # 直接Stripeのチェックアウトセッションを作成
+    try:
+        price_id = stripe_price_id or "price_1RYfUgGEUGCv0Pohu7xYJzlJ"
+        
+        if not price_id:
+            return jsonify({"error": "Stripe Price IDが設定されていません"}), 500
+        
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price": price_id,
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url="https://lovehack20.onrender.com/success",
+            cancel_url="https://lovehack20.onrender.com/cancel",
+            metadata={"userId": user_id}
+        )
+        print(f"DEBUG: Created Stripe session URL: {session.url}")
+        return jsonify({"url": session.url})
+        
+    except Exception as e:
+        print(f"ERROR: Stripe session creation failed: {str(e)}")
+        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
 
 
 # 成功ページ
@@ -443,24 +471,10 @@ def success_page():
 def cancel_page():
     return "<h1>決済をキャンセルしました。</h1>"
 
-# /checkoutエンドポイントの追加 (GETリクエストでStripe Checkout Sessionを呼び出すためのリダイレクト)
-@app.route("/checkout", methods=["GET"])
-def checkout_redirect():
-    user_id = request.args.get("uid")
-    if not user_id:
-        return "エラー: userIdが指定されていません。", 400
-
-    # Flask内部で/create_checkout_sessionを呼び出す
-    with app.test_request_context(method='POST', path='/create_checkout_session', json={"userId": user_id}):
-        response = create_checkout_session()
-        data = json.loads(response[0].get_data(as_text=True)) # レスポンスからJSONデータを解析
-        checkout_url = data.get("checkout_url")
-        if checkout_url:
-            from flask import redirect
-            return redirect(checkout_url, code=302) # StripeのCheckoutページへリダイレクト
-        else:
-            return "決済URLの生成に失敗しました。", 500
-
+# ルートエンドポイント（ヘルスチェック用）
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({"status": "ok", "message": "LoveHack API is running"})
 
 if __name__ == "__main__":
     # 環境変数が設定されているか確認
@@ -470,4 +484,5 @@ if __name__ == "__main__":
             print(f"⚠️ 警告: 環境変数 {var} が設定されていません。関連機能が動作しない可能性があります。")
 
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) # PORT環境変数を使用
+ 
  
