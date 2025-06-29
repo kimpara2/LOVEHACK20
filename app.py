@@ -29,6 +29,24 @@ def notify_gas_payment_success(user_id):
     except Exception as e:
         print("❌ GAS通知エラー:", str(e))
 
+# GASへの詳細アドバイス送信関数
+def send_detailed_advice_to_gas(user_id, mbti):
+    GAS_URL = os.getenv("GAS_NOTIFY_URL")
+    if not GAS_URL:
+        print("⚠️ GAS_NOTIFY_URLが設定されていません。詳細アドバイス送信をスキップします。")
+        return
+    
+    try:
+        # GASのgetDetailedAdvice関数を呼び出すためのリクエスト
+        res = requests.post(GAS_URL, json={
+            "action": "send_detailed_advice",
+            "userId": user_id,
+            "mbti": mbti
+        })
+        print("✅ 詳細アドバイス送信済み:", res.status_code, res.text)
+    except Exception as e:
+        print("❌ 詳細アドバイス送信エラー:", str(e))
+
 # 🔐 OpenAI・Stripe・LINE設定
 openai_api_key = os.getenv("OPENAI_API_KEY")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
@@ -414,7 +432,18 @@ def stripe_webhook():
         cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
         conn.commit()
         conn.close()
+        
+        # 課金完了通知をGASに送信
         notify_gas_payment_success(user_id)
+        
+        # ユーザーのMBTIを取得して詳細アドバイスを送信
+        user_profile = get_user_profile(user_id)
+        if user_profile and user_profile.get("mbti"):
+            send_detailed_advice_to_gas(user_id, user_profile["mbti"])
+            print(f"✅ 課金完了: ユーザー{user_id}の詳細アドバイスを送信しました（MBTI: {user_profile['mbti']}）")
+        else:
+            print(f"⚠️ 課金完了: ユーザー{user_id}のMBTIが見つかりませんでした")
+        
         return '', 200
     except Exception as e:
         print(f"Stripe webhook処理エラー: {e}")
@@ -425,21 +454,32 @@ def stripe_webhook():
 # ユーザーをStripeのCheckoutページにリダイレクトさせるURLを返す
 @app.route("/create_payment_url", methods=["POST"])
 def create_payment_url():
-    data = request.get_json()
-    print(f"DEBUG: create_payment_url received data: {data}")
-    
-    user_id = data.get("userId")
-    print(f"DEBUG: userId extracted: {user_id}")
-
-    if not user_id:
-        print("ERROR: userId is missing or empty")
-        return jsonify({"error": "userIdが必要です"}), 400
-
-    # 直接Stripeのチェックアウトセッションを作成
     try:
+        data = request.get_json()
+        print(f"DEBUG: create_payment_url received data: {data}")
+        
+        user_id = data.get("userId")
+        print(f"DEBUG: userId extracted: {user_id}")
+
+        if not user_id:
+            print("ERROR: userId is missing or empty")
+            return jsonify({"error": "userIdが必要です"}), 400
+
+        # 環境変数の確認
+        print(f"DEBUG: stripe.api_key = {'SET' if stripe.api_key else 'NOT SET'}")
+        print(f"DEBUG: stripe_price_id = {stripe_price_id}")
+        
+        # Stripe APIキーが設定されているか確認
+        if not stripe.api_key:
+            print("ERROR: Stripe API key is not set")
+            return jsonify({"error": "Stripe API key is not configured"}), 500
+
+        # 直接Stripeのチェックアウトセッションを作成
         price_id = stripe_price_id or "price_1RYfUgGEUGCv0Pohu7xYJzlJ"
+        print(f"DEBUG: Using price_id: {price_id}")
         
         if not price_id:
+            print("ERROR: No valid price ID found")
             return jsonify({"error": "Stripe Price IDが設定されていません"}), 500
         
         session = stripe.checkout.Session.create(
@@ -453,13 +493,50 @@ def create_payment_url():
             cancel_url="https://lovehack20.onrender.com/cancel",
             metadata={"userId": user_id}
         )
-        print(f"DEBUG: Created Stripe session URL: {session.url}")
-        return jsonify({"url": session.url})
         
+        original_url = session.url
+        print(f"DEBUG: Original Stripe URL length: {len(original_url)}")
+        print(f"DEBUG: Original Stripe URL: {original_url}")
+        
+        # URL短縮を試行
+        try:
+            shortened_url = shorten_url(original_url)
+            print(f"DEBUG: Shortened URL length: {len(shortened_url)}")
+            print(f"DEBUG: Shortened URL: {shortened_url}")
+            final_url = shortened_url
+        except Exception as e:
+            print(f"WARNING: URL shortening failed: {str(e)}, using original URL")
+            final_url = original_url
+        
+        return jsonify({"url": final_url})
+        
+    except stripe.error.StripeError as e:
+        print(f"ERROR: Stripe API error: {str(e)}")
+        return jsonify({"error": f"Stripe API error: {str(e)}"}), 500
     except Exception as e:
-        print(f"ERROR: Stripe session creation failed: {str(e)}")
-        return jsonify({"error": f"Stripe error: {str(e)}"}), 500
+        print(f"ERROR: Unexpected error in create_payment_url: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
+# URL短縮関数
+def shorten_url(long_url):
+    """URL短縮サービスを使用してURLを短縮する"""
+    try:
+        # TinyURL APIを使用（無料で利用可能）
+        response = requests.post(
+            "https://tinyurl.com/api-create.php",
+            data={"url": long_url},
+            timeout=10
+        )
+        if response.status_code == 200:
+            return response.text
+        else:
+            raise Exception(f"TinyURL API error: {response.status_code}")
+    except Exception as e:
+        print(f"URL shortening error: {str(e)}")
+        # 短縮に失敗した場合は元のURLを返す
+        return long_url
 
 # 成功ページ
 @app.route("/success", methods=["GET"])
@@ -476,13 +553,74 @@ def cancel_page():
 def root():
     return jsonify({"status": "ok", "message": "LoveHack API is running"})
 
+# LINE Webhookエンドポイント（LINEプラットフォームからのPOSTリクエストを受け取る）
+@app.route("/webhook", methods=["POST"])
+def line_webhook():
+    try:
+        # LINEプラットフォームからのリクエストを受け取る
+        data = request.get_json()
+        print(f"LINE Webhook received: {data}")
+        
+        # ここでLINEからのメッセージを処理する
+        # 現在はGASがメッセージ処理を担当しているため、
+        # このエンドポイントは単純に200 OKを返すだけ
+        
+        return '', 200
+    except Exception as e:
+        print(f"LINE Webhook error: {e}")
+        return '', 200  # エラーが発生しても200 OKを返す（LINEの要件）
+
+# LINE Webhookの代替パス（LINEプラットフォームが使用する可能性のあるパス）
+@app.route("/callback", methods=["POST"])
+def line_callback():
+    try:
+        data = request.get_json()
+        print(f"LINE Callback received: {data}")
+        return '', 200
+    except Exception as e:
+        print(f"LINE Callback error: {e}")
+        return '', 200
+
+# LINE Messaging API Webhook（標準的なパス）
+@app.route("/messaging-api/webhook", methods=["POST"])
+def messaging_api_webhook():
+    try:
+        data = request.get_json()
+        print(f"LINE Messaging API Webhook received: {data}")
+        return '', 200
+    except Exception as e:
+        print(f"LINE Messaging API Webhook error: {e}")
+        return '', 200
+
+# テスト用エンドポイント（GASからのリクエスト確認用）
+@app.route("/test", methods=["POST"])
+def test_endpoint():
+    try:
+        data = request.get_json()
+        print(f"TEST: Received data: {data}")
+        return jsonify({"status": "success", "received_data": data})
+    except Exception as e:
+        print(f"TEST ERROR: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     # 環境変数が設定されているか確認
+    print("=== 環境変数チェック ===")
     required_env_vars = ["OPENAI_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_PRICE_ID", "STRIPE_WEBHOOK_SECRET"]
     for var in required_env_vars:
-        if not os.getenv(var):
+        value = os.getenv(var)
+        if not value:
             print(f"⚠️ 警告: 環境変数 {var} が設定されていません。関連機能が動作しない可能性があります。")
+        else:
+            print(f"✅ {var}: {'SET' if value else 'NOT SET'}")
+    
+    print(f"=== Stripe設定確認 ===")
+    print(f"Stripe API Key: {'SET' if stripe.api_key else 'NOT SET'}")
+    print(f"Stripe Price ID: {stripe_price_id}")
+    print(f"GAS Notify URL: {os.getenv('GAS_NOTIFY_URL', 'NOT SET')}")
+    print("========================")
 
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) # PORT環境変数を使用
+ 
  
  
