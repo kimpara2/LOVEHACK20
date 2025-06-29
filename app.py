@@ -28,6 +28,7 @@ def notify_gas_payment_success(user_id):
 # 🔐 OpenAI・Stripe・LINE設定
 openai_api_key = os.getenv("OPENAI_API_KEY")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+stripe_price_id = os.getenv("STRIPE_PRICE_ID")
 LINE_WEBHOOK_URL = os.getenv("LINE_WEBHOOK_URL")
 
 # 🧳 chroma_db.zip を展開（初回起動時）
@@ -299,9 +300,25 @@ def create_checkout_session():
     user_id = data.get("userId")
     if not user_id:
         return jsonify({"error": "userIdが必要です"}), 400
-    # StripeのCheckout URL生成（ダミー）
-    checkout_url = f'https://checkout.stripe.com/pay/test_{user_id}'
-    return jsonify({'checkout_url': checkout_url})
+    
+    if not stripe_price_id:
+        return jsonify({"error": "Stripe Price IDが設定されていません"}), 500
+    
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price": stripe_price_id,
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url="https://lovehack20.onrender.com/success",
+            cancel_url="https://lovehack20.onrender.com/cancel",
+            metadata={"userId": user_id}
+        )
+        return jsonify({"checkout_url": session.url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # 🔍 MBTI詳細アドバイス取得エンドポイント
 # 有料ユーザー向けの詳細アドバイスを返す
@@ -444,5 +461,4 @@ if __name__ == "__main__":
             print(f"⚠️ 警告: 環境変数 {var} が設定されていません。関連機能が動作しない可能性があります。")
 
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) # PORT環境変数を使用
- 
  
