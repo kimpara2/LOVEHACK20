@@ -242,6 +242,14 @@ def process_mbti_answer(user_id, answer, user_profile):
         # 新しい回答を追加
         answers.append(1 if answer == "はい" else 0)
         
+        # 回答をログに出力
+        print(f"=== MBTI回答ログ ===")
+        print(f"ユーザーID: {user_id}")
+        print(f"現在の回答数: {len(answers)}/10")
+        print(f"最新の回答: {answer} (数値: {1 if answer == 'はい' else 0})")
+        print(f"全回答履歴: {answers}")
+        print(f"==================")
+        
         # 回答を保存
         cursor.execute("UPDATE users SET mbti_answers=? WHERE user_id=?", (json.dumps(answers), user_id))
         conn.commit()
@@ -250,9 +258,11 @@ def process_mbti_answer(user_id, answer, user_profile):
         # 次の質問を送信
         next_question_index = len(answers)
         if next_question_index < 10:
+            print(f"次の質問を送信: 質問{next_question_index + 1}/10")
             return send_mbti_question(user_id, next_question_index)
         else:
             # 診断完了
+            print(f"診断完了！全回答: {answers}")
             return complete_mbti_diagnosis(user_id, answers)
             
     except Exception as e:
@@ -273,16 +283,13 @@ def complete_mbti_diagnosis(user_id, answers):
         conn.commit()
         conn.close()
         
-        # 診断結果メッセージを作成（簡潔版）
+        # 診断結果メッセージのみ（課金誘導なし）
         result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
-        
-        # 決済誘導メッセージ（従来のテキスト形式）
-        payment_message = "----------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n----------------------"
         
         # GASに詳細アドバイス送信を依頼（課金後に送信される）
         send_detailed_advice_to_gas(user_id, mbti)
         
-        return f"{result_message}\n\n{payment_message}"
+        return result_message
         
     except Exception as e:
         print(f"MBTI診断完了エラー: {e}")
@@ -311,6 +318,37 @@ def get_mbti_description(mbti):
     }
     
     return descriptions.get(mbti, f"{mbti}タイプのあなたは、独特な魅力を持った恋愛タイプです。")
+
+# 課金誘導メッセージ送信関数
+def send_payment_message(user_id):
+    """課金誘導メッセージを送信"""
+    payment_message = "----------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n----------------------"
+    
+    # LINEに直接送信（push message）
+    try:
+        line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+        if not line_token:
+            print("⚠️ LINE_CHANNEL_ACCESS_TOKENが設定されていません")
+            return
+        
+        url = "https://api.line.me/v2/bot/message/push"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {line_token}"
+        }
+        
+        data = {
+            "to": user_id,
+            "messages": [{"type": "text", "text": payment_message}]
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        print(f"Payment message sent: {response.status_code}")
+        
+    except Exception as e:
+        print(f"Payment message send error: {e}")
+    
+    return payment_message
 
 # ユーザーメッセージ処理関数
 def process_user_message(user_id, message, user_profile):
@@ -355,7 +393,31 @@ def process_user_message(user_id, message, user_profile):
         else:
             return "【はい】か【いいえ】で答えてね！"
     
-    # 通常のメッセージ処理
+    # 無課金ユーザーの制限（診断中以外は課金誘導）
+    if not user_profile.get('is_paid', False):
+        if message == "診断開始":
+            return start_mbti_diagnosis(user_id)
+        elif message == "性別登録":
+            # 性別登録モードに設定
+            conn = sqlite3.connect("user_data.db")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            return "性別を教えてね！【男】か【女】で答えてください。"
+        elif message == "相手MBTI登録":
+            # 相手MBTI登録モードに設定
+            conn = sqlite3.connect("user_data.db")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            return "相手のMBTIを教えてね！（例：INTJ、ENFP）"
+        else:
+            # 無課金ユーザーは課金誘導メッセージ
+            return "📌専属恋愛AIのお喋り機能は有料会員様限定です！\n恋愛傾向診断を始めて有料会員になりたい場合は『診断開始』と送ってね✨"
+    
+    # 有料ユーザーの通常処理
     if message == "診断開始":
         return start_mbti_diagnosis(user_id)
     elif message == "性別登録":
@@ -499,12 +561,50 @@ def line_webhook():
                         # ユーザープロファイルを取得
                         user_profile = get_user_profile(user_id)
                         
-                        # MBTI回答を処理
-                        response_message = process_mbti_answer(user_id, answer, user_profile)
-                        print(f"MBTI response: {response_message}")
+                        # まずユーザーの回答を表示
+                        send_line_reply(reply_token, answer)
                         
-                        # LINEにリプライを送信
-                        send_line_reply(reply_token, response_message)
+                        # 少し遅延させてから次の質問を処理
+                        import threading
+                        import time
+                        
+                        def process_next_question():
+                            time.sleep(1)  # 1秒待機
+                            # MBTI回答を処理
+                            response_message = process_mbti_answer(user_id, answer, user_profile)
+                            print(f"MBTI response: {response_message}")
+                            
+                            # 次の質問または診断完了を送信
+                            line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+                            if line_token:
+                                url = "https://api.line.me/v2/bot/message/push"
+                                headers = {
+                                    "Content-Type": "application/json",
+                                    "Authorization": f"Bearer {line_token}"
+                                }
+                                
+                                # メッセージが辞書（テンプレート）の場合はそのまま使用
+                                if isinstance(response_message, dict):
+                                    data = {
+                                        "to": user_id,
+                                        "messages": [response_message]
+                                    }
+                                else:
+                                    # 文字列の場合は通常のテキストメッセージ
+                                    data = {
+                                        "to": user_id,
+                                        "messages": [{"type": "text", "text": response_message}]
+                                    }
+                                
+                                response = requests.post(url, headers=headers, json=data)
+                                print(f"Next question sent: {response.status_code}")
+                                
+                                # 診断完了の場合、課金誘導メッセージを別途送信
+                                if "診断完了" in str(response_message):
+                                    time.sleep(2)  # 2秒待機
+                                    send_payment_message(user_id)
+                        
+                        threading.Thread(target=process_next_question).start()
         
         return '', 200
         
