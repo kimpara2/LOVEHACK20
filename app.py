@@ -593,6 +593,10 @@ def line_webhook():
 # ユーザーメッセージ処理関数
 def process_user_message(user_id, message, user_profile):
     """ユーザーメッセージを処理して適切な応答を返す"""
+
+# 初回ユーザーの場合、自動的に診断開始
+    if not user_profile:
+        return start_mbti_diagnosis(user_id)
     
     # 性別登録モードの処理
     if user_profile.get('mode') == 'register_gender':
