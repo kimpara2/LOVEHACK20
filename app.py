@@ -128,30 +128,24 @@ init_db()
 
 # ユーザープロファイルの取得
 def get_user_profile(user_id):
-    print(f"Getting user profile for user_id: {user_id}")
     conn = sqlite3.connect("user_data.db")
     cursor = conn.cursor()
     cursor.execute("SELECT mbti, gender, target_mbti, is_paid, mode FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
-    conn.close()
-    
     if not row:
         # ユーザーが存在しない場合は作成
-        conn = sqlite3.connect("user_data.db")
-        cursor = conn.cursor()
         cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
         conn.close()
-        return None
-    
+        return None  # 新規作成時はprofileなし
     profile = {
         "mbti": row[0] if row[0] else "不明",
         "gender": row[1] if row[1] else "不明",
         "target_mbti": row[2] if row[2] else "不明",
-        "is_paid": bool(row[3]) if row[3] else False,
+        "is_paid": bool(row[3]),
         "mode": row[4] if row[4] else ""
     }
-    
+    conn.close()
     print(f"User profile result: {profile}")
     return profile
 
@@ -160,7 +154,8 @@ def calc_mbti(answers):
     score = {'E': 0, 'I': 0, 'S': 0, 'N': 0, 'T': 0, 'F': 0, 'J': 0, 'P': 0}
     mapping = [
         ('E', 'I'), ('P', 'J'), ('S', 'N'), ('T', 'F'), ('E', 'I'),
-        ('J', 'P'), ('N', 'S'), ('I', 'E'), ('F', 'T'), ('P', 'J')
+        ('J', 'P'), ('N', 'S'), ('I', 'E'), ('F', 'T'), ('P', 'J'),
+        ('I', 'E'), ('P', 'J'), ('N', 'S'), ('T', 'F'), ('S', 'N')
     ]
     for i, ans in enumerate(answers):
         yes, no = mapping[i]
@@ -201,16 +196,40 @@ def start_mbti_diagnosis(user_id):
 def send_mbti_question(user_id, question_index):
     """MBTI診断の質問を送信（ボタン式）"""
     questions = [
-        "好きな人とは、毎日LINEしたいほう？🥺",
-        "デートの計画よりも、その時の気分で動くのが好き😳",
-        "恋人のちょっとした変化にもすぐ気づくほうだ😊",
-        "恋人の相談には、共感よりもアドバイスを優先しがち？📱",
-        "初対面でも気になる人には自分から話しかけるほうだ？📅",
-        "好きな人との関係がハッキリしないのは苦手？☕️",
-        "デートは、思い出に残るようなロマンチックな演出が好き？💬",
-        "気になる人がいても、自分の気持ちはなかなか伝えられない？👫",
-        "恋愛には、価値観の一致が何より大事だと思う？💌",
-        "相手の好みに合わせて、自分のキャラを柔軟に変えられる？😅"
+        "好きな人とは、毎日LINEしたいほう？🥺",                # E/I
+        "デートの計画よりも、その時の気分で動くのが好き😳",      # P/J
+        "恋人のちょっとした変化にもすぐ気づくほうだ😊",         # S/N
+        "恋人の相談には、共感よりもアドバイスを優先しがち？📱",   # T/F
+        "初対面でも気になる人には自分から話しかけるほうだ？📅", # E/I
+        "好きな人との関係がハッキリしないのは苦手？☕️",         # J/P
+        "デートは、思い出に残るようなロマンチックな演出が好き？💬", # N/S
+        "気になる人がいても、自分の気持ちはなかなか伝えられない？  ", # I/E
+        "恋愛には、価値観の一致が何より大事だと思う？💌",         # F/T
+        "相手の好みに合わせて、自分のキャラを柔軟に変えられる？😅", # P/J
+        # 追加5問（恋愛寄り・被りなし）
+        "相手から急に誘われても割と気軽に会いに行ける？",         # E/I
+        "恋人のサプライズやイベントを計画するのが好き？",         # J/P
+        "恋人の行動には『気持ちがこもっているか』が気になる？",           # F/T
+        "恋愛では、相手の過去や細かいことも気になるほう？",     # S/N
+        "好きな人との未来はちゃんと考えてから付き合いたい？"           # E/I
+    ]
+    
+    mapping = [
+        ('E', 'I'),  # Q1
+        ('P', 'J'),  # Q2
+        ('S', 'N'),  # Q3
+        ('T', 'F'),  # Q4
+        ('E', 'I'),  # Q5
+        ('J', 'P'),  # Q6
+        ('N', 'S'),  # Q7
+        ('I', 'E'),  # Q8
+        ('F', 'T'),  # Q9
+        ('P', 'J'),  # Q10
+        ('E', 'I'),  # Q11
+        ('J', 'P'),  # Q12
+        ('F', 'T'),  # Q13
+        ('S', 'N'),  # Q14
+        ('J', 'P')   # Q15
     ]
     
     if question_index >= len(questions):
@@ -219,10 +238,10 @@ def send_mbti_question(user_id, question_index):
     # ボタンテンプレートを作成（messageアクションでユーザーの吹き出しに）
     template = {
         "type": "template",
-        "altText": f"質問{question_index + 1}/10: {questions[question_index]}",
+        "altText": f"質問{question_index + 1}/15: {questions[question_index]}",
         "template": {
             "type": "buttons",
-            "title": f"質問{question_index + 1}/10",
+            "title": f"質問{question_index + 1}/15",
             "text": questions[question_index],
             "actions": [
                 {
@@ -255,7 +274,7 @@ def process_mbti_answer(user_id, answer, user_profile):
         answers.append(1 if answer == "はい" else 0)
         print(f"=== MBTI回答ログ ===")
         print(f"ユーザーID: {user_id}")
-        print(f"現在の回答数: {len(answers)}/10")
+        print(f"現在の回答数: {len(answers)}/15")
         print(f"最新の回答: {answer} (数値: {1 if answer == 'はい' else 0})")
         print(f"全回答履歴: {answers}")
         print(f"==================")
@@ -263,8 +282,8 @@ def process_mbti_answer(user_id, answer, user_profile):
         conn.commit()
         conn.close()
         next_question_index = len(answers)
-        if next_question_index < 10:
-            print(f"次の質問を送信: 質問{next_question_index + 1}/10")
+        if next_question_index < 15:
+            print(f"次の質問を送信: 質問{next_question_index + 1}/15")
             return send_mbti_question(user_id, next_question_index)
         else:
             print(f"診断完了！全回答: {answers}")
@@ -295,7 +314,7 @@ def complete_mbti_diagnosis(user_id, answers):
         # 診断結果メッセージのみ（課金誘導なし）
         result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
         
-        # GASへの詳細アドバイス送信はここでは呼ばない（決済完了時のみ）
+       　 # GASへの詳細アドバイス送信はここでは呼ばない（決済完了時のみ）
         # send_detailed_advice_to_gas(user_id, mbti)
         
         return result_message
