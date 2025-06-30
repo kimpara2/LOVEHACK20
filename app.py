@@ -314,7 +314,7 @@ def complete_mbti_diagnosis(user_id, answers):
         # 診断結果メッセージのみ（課金誘導なし）
         result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
         
-       　 # GASへの詳細アドバイス送信はここでは呼ばない（決済完了時のみ）
+        # GASへの詳細アドバイス送信はここでは呼ばない（決済完了時のみ）
         # send_detailed_advice_to_gas(user_id, mbti)
         
         return result_message
