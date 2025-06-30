@@ -243,45 +243,37 @@ def send_mbti_question(user_id, question_index):
 
 # MBTI回答処理関数
 def process_mbti_answer(user_id, answer, user_profile):
-    """MBTI診断の回答を処理"""
     try:
-        # 現在の回答を取得
         conn = sqlite3.connect("user_data.db")
         cursor = conn.cursor()
         cursor.execute("SELECT mbti_answers FROM users WHERE user_id=?", (user_id,))
         row = cursor.fetchone()
-        
         if row and row[0]:
             answers = json.loads(row[0])
         else:
             answers = []
-        
-        # 新しい回答を追加
         answers.append(1 if answer == "はい" else 0)
-        
-        # 回答をログに出力
         print(f"=== MBTI回答ログ ===")
         print(f"ユーザーID: {user_id}")
         print(f"現在の回答数: {len(answers)}/10")
         print(f"最新の回答: {answer} (数値: {1 if answer == 'はい' else 0})")
         print(f"全回答履歴: {answers}")
         print(f"==================")
-        
-        # 回答を保存
         cursor.execute("UPDATE users SET mbti_answers=? WHERE user_id=?", (json.dumps(answers), user_id))
         conn.commit()
         conn.close()
-        
-        # 次の質問を送信
         next_question_index = len(answers)
         if next_question_index < 10:
             print(f"次の質問を送信: 質問{next_question_index + 1}/10")
             return send_mbti_question(user_id, next_question_index)
         else:
-            # 診断完了
             print(f"診断完了！全回答: {answers}")
-            return complete_mbti_diagnosis(user_id, answers)
-            
+            result_message = complete_mbti_diagnosis(user_id, answers)
+            payment_message = get_payment_message(user_id)
+            return [
+                {"type": "text", "text": result_message},
+                {"type": "text", "text": payment_message}
+            ]
     except Exception as e:
         print(f"MBTI回答処理エラー: {e}")
         return "エラーが発生しました。もう一度診断を開始してください。"
@@ -292,7 +284,7 @@ def complete_mbti_diagnosis(user_id, answers):
     try:
         # MBTI計算
         mbti = calc_mbti(answers)
-
+        
         # 結果を保存
         conn = sqlite3.connect("user_data.db")
         cursor = conn.cursor()
@@ -335,10 +327,8 @@ def get_mbti_description(mbti):
     
     return descriptions.get(mbti, f"{mbti}タイプのあなたは、独特な魅力を持った恋愛タイプです。")
 
-# 課金誘導メッセージ送信関数
-def send_payment_message(user_id):
-    """課金誘導メッセージを送信"""
-    # 実際のStripe決済URLを生成
+# payment_messageを返すだけの関数に変更
+def get_payment_message(user_id):
     try:
         if stripe.api_key and stripe_price_id:
             # 本番用URL設定（環境変数から取得）
@@ -361,45 +351,12 @@ def send_payment_message(user_id):
                 }
             )
             payment_url = checkout_session.url
-            print(f"✅ Stripe決済URL生成: {payment_url}")
         else:
-            # Stripe設定がない場合はダミーURL
             payment_url = f"https://checkout.stripe.com/pay/test_{user_id}"
-            print("⚠️ Stripe設定が不完全です。ダミーURLを使用します。")
     except Exception as e:
-        # エラー時はダミーURL
         payment_url = f"https://checkout.stripe.com/pay/test_{user_id}"
         print(f"❌ Stripe決済URL生成エラー: {e}")
-    
     payment_message = f"----------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n\n決済URL: {payment_url}\n----------------------"
-    
-    # LINEに直接送信（push message）
-    try:
-        line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-        if not line_token:
-            print("⚠️ LINE_CHANNEL_ACCESS_TOKENが設定されていません")
-            return
-        
-        url = "https://api.line.me/v2/bot/message/push"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {line_token}"
-        }
-        
-        data = {
-            "to": user_id,
-            "messages": [{"type": "text", "text": payment_message}]
-        }
-        
-        response = requests.post(url, headers=headers, json=data)
-        print(f"Payment message sent: {response.status_code}")
-        
-        if response.status_code != 200:
-            print(f"⚠️ LINE送信エラー: {response.status_code} - {response.text}")
-        
-    except Exception as e:
-        print(f"Payment message send error: {e}")
-    
     return payment_message
 
 # 課金完了時の処理関数
@@ -744,4 +701,4 @@ if __name__ == '__main__':
     print(f"GAS Notify URL: {os.getenv('GAS_NOTIFY_URL', 'NOT SET')}")
     print("========================")
 
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))  
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) 
