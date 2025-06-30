@@ -216,7 +216,7 @@ def send_mbti_question(user_id, question_index):
     if question_index >= len(questions):
         return "診断が完了しました！"
     
-    # ボタンテンプレートを作成
+    # ボタンテンプレートを作成（messageアクションでユーザーの吹き出しに）
     template = {
         "type": "template",
         "altText": f"質問{question_index + 1}/10: {questions[question_index]}",
@@ -226,14 +226,14 @@ def send_mbti_question(user_id, question_index):
             "text": questions[question_index],
             "actions": [
                 {
-                    "type": "postback",
+                    "type": "message",
                     "label": "はい",
-                    "data": f"mbti_answer:yes:{question_index}"
+                    "text": "はい"
                 },
                 {
-                    "type": "postback",
+                    "type": "message",
                     "label": "いいえ",
-                    "data": f"mbti_answer:no:{question_index}"
+                    "text": "いいえ"
                 }
             ]
         }
@@ -292,7 +292,7 @@ def complete_mbti_diagnosis(user_id, answers):
     try:
         # MBTI計算
         mbti = calc_mbti(answers)
-        
+
         # 結果を保存
         conn = sqlite3.connect("user_data.db")
         cursor = conn.cursor()
@@ -303,8 +303,8 @@ def complete_mbti_diagnosis(user_id, answers):
         # 診断結果メッセージのみ（課金誘導なし）
         result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
         
-        # GASに詳細アドバイス送信を依頼（課金後に送信される）
-        send_detailed_advice_to_gas(user_id, mbti)
+        # GASへの詳細アドバイス送信はここでは呼ばない（決済完了時のみ）
+        # send_detailed_advice_to_gas(user_id, mbti)
         
         return result_message
         
@@ -312,7 +312,6 @@ def complete_mbti_diagnosis(user_id, answers):
         print(f"MBTI診断完了エラー: {e}")
         return "診断結果の処理中にエラーが発生しました。"
 
-# MBTI説明取得関数
 def get_mbti_description(mbti):
     """MBTIタイプの説明を取得"""
     descriptions = {
@@ -638,8 +637,9 @@ def line_webhook():
                         # ユーザープロファイルを取得
                         user_profile = get_user_profile(user_id)
                         
-                        # まずユーザーの回答を表示（ユーザー側に表示）
-                        send_line_reply(reply_token, answer)
+                        # Bot側の吹き出しで「あなたの回答：はい/いいえ」を表示
+                        bot_answer_message = f"あなたの回答：{answer}"
+                        send_line_reply(reply_token, bot_answer_message)
                         
                         # 少し遅延させてから次の質問を処理（スピードアップ）
                         import threading
@@ -744,4 +744,4 @@ if __name__ == '__main__':
     print(f"GAS Notify URL: {os.getenv('GAS_NOTIFY_URL', 'NOT SET')}")
     print("========================")
 
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))) 
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))  
