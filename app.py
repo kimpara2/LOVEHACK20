@@ -342,7 +342,7 @@ def send_payment_message(user_id):
     try:
         if stripe.api_key and stripe_price_id:
             # 本番用URL設定（環境変数から取得）
-            base_url = os.getenv("BASE_URL", "https://your-domain.com")
+            base_url = os.getenv("BASE_URL", "https://lovehack20.onrender.com")
             success_url = f"{base_url}/success?session_id={{CHECKOUT_SESSION_ID}}&user_id={user_id}"
             cancel_url = f"{base_url}/cancel?user_id={user_id}"
             
