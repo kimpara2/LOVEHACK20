@@ -343,7 +343,7 @@ def get_payment_message(user_id):
                     'price': stripe_price_id,
                     'quantity': 1,
                 }],
-                mode='payment',
+                mode='subscription',
                 success_url=success_url,
                 cancel_url=cancel_url,
                 metadata={
