@@ -356,7 +356,7 @@ def get_payment_message(user_id):
     except Exception as e:
         payment_url = f"https://checkout.stripe.com/pay/test_{user_id}"
         print(f"❌ Stripe決済URL生成エラー: {e}")
-    payment_message = f"----------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n\n決済URL: {payment_url}\n----------------------解約時は『解約』と入力で解約できます。"
+    payment_message = f"--------------------------------\n💡もっと詳しく知りたい？💘\n\nどんな異性も落とせるようになるあなただけの詳しい恋愛攻略法\n『あなただけの専属の恋愛AI相談』が解放されます✨\n\n👉今すぐ登録して、完全版アドバイスと専属恋愛AIを試してみよう！\n\n決済URL: {payment_url}\n--------------------------------解約時は『解約』と入力でいつでも解約できます。"
     return payment_message
 
 # 課金完了時の処理関数
@@ -714,6 +714,10 @@ def env_test():
 @app.route("/", methods=["GET"])
 def root():
     return "LINE MBTI診断ボットが動作中です！"
+
+@app.route("/return", methods=["GET"])
+def return_page():
+    return "<h1>決済が完了しました！LINEに戻ってサービスをご利用ください。</h1>"
 
 if __name__ == '__main__':
     # 環境変数が設定されているか確認
