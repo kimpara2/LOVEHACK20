@@ -725,6 +725,14 @@ def root():
 def return_page():
     return "<h1>決済が完了しました！LINEに戻ってサービスをご利用ください。</h1>"
 
+@app.route("/success", methods=["GET"])
+def success_page():
+    return "<h1>決済が完了しました🎉 LINEに戻ってください！</h1>"
+
+@app.route("/cancel", methods=["GET"])
+def cancel_page():
+    return "<h1>決済をキャンセルしました。</h1>"
+
 @app.route("/mbti_collect", methods=["POST"])
 def mbti_collect():
     data = request.get_json()
