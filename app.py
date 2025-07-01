@@ -783,6 +783,44 @@ def mbti_collect():
         "payment_message": payment_message
     })
 
+@app.route("/stripe_webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get("stripe-signature")
+    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        print("🧾 Stripe イベントタイプ:", event["type"])
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return "Webhook error", 400
+
+    # 決済完了イベント時の処理
+    if event["type"] in ["invoice.payment_succeeded", "checkout.session.completed"]:
+        # user_idを特定
+        obj = event["data"]["object"]
+        user_id = None
+        # checkout.session.completedの場合
+        if "metadata" in obj and "user_id" in obj["metadata"]:
+            user_id = obj["metadata"]["user_id"]
+        # invoice.payment_succeededの場合（customer_idからuser_idを逆引き）
+        elif "customer" in obj:
+            customer_id = obj["customer"]
+            conn = sqlite3.connect("user_data.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_id FROM stripe_customers WHERE customer_id=?", (customer_id,))
+            row = cursor.fetchone()
+            if row:
+                user_id = row[0]
+            conn.close()
+        if user_id:
+            handle_payment_completion(user_id)
+            print(f"✅ 決済完了処理実行: user_id={user_id}")
+        else:
+            print("⚠️ user_idが特定できませんでした")
+    return "OK", 200
+
 if __name__ == '__main__':
     # 環境変数が設定されているか確認
     print("=== 環境変数チェック ===")
