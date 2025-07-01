@@ -157,24 +157,15 @@ init_db()
 def get_user_profile(user_id):
     conn = sqlite3.connect("user_data.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT mbti, gender, target_mbti, is_paid, mode FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT mbti, gender, target_mbti, is_paid FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
-    if not row:
-        # ユーザーが存在しない場合は作成
-        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
-        conn.commit()
-        conn.close()
-        return None  # 新規作成時はprofileなし
-    profile = {
-        "mbti": row[0] if row[0] else "不明",
-        "gender": row[1] if row[1] else "不明",
-        "target_mbti": row[2] if row[2] else "不明",
-        "is_paid": bool(row[3]),
-        "mode": row[4] if row[4] else ""
-    }
     conn.close()
-    print(f"User profile result: {profile}")
-    return profile
+    return {
+        "mbti": row[0] if row else "不明",
+        "gender": row[1] if row else "不明",
+        "target_mbti": row[2] if row else "不明",
+        "is_paid": bool(row[3]) if row else False
+    }
 
 # MBTI集計ロジック
 def calc_mbti(answers):
@@ -820,6 +811,80 @@ def stripe_webhook():
         else:
             print("⚠️ user_idが特定できませんでした")
     return "OK", 200
+
+# --- PDF/LLM連携AI応答用の補助関数 ---
+def save_message(user_id, role, content):
+    conn = sqlite3.connect("user_data.db")
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO messages (user_id, role, content) VALUES (?, ?, ?)", (user_id, role, content))
+    conn.commit()
+    conn.close()
+
+def get_recent_history(user_id, limit=5):
+    conn = sqlite3.connect("user_data.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT role, content FROM messages WHERE user_id=? ORDER BY rowid DESC LIMIT ?", (user_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return [f"{row[0]}: {row[1]}" for row in reversed(rows)]
+
+# PDFベクトルDBからRetrieverを取得
+VECTOR_BASE = "chroma_db"
+def get_retrievers(user_profile):
+    sub_paths = [
+        f"self/{user_profile['mbti']}",
+        f"partner/{user_profile['target_mbti']}",
+        user_profile['gender'],
+        "common"
+    ]
+    retrievers = []
+    for sub in sub_paths:
+        path = os.path.join(VECTOR_BASE, sub)
+        if os.path.exists(path):
+            # Chromaのロード方法は環境依存なので、ここは仮の例
+            retrievers.append(Chroma(persist_directory=path, embedding_function=OpenAIEmbeddings()))
+    return retrievers
+
+def get_qa_chain(user_profile):
+    from langchain.retrievers import EnsembleRetriever
+    retrievers = get_retrievers(user_profile)
+    if not retrievers:
+        raise ValueError("該当するベクトルDBが見つかりません")
+    combined = EnsembleRetriever(retrievers=retrievers)
+    llm = ChatOpenAI(openai_api_key=openai_api_key)
+    return RetrievalQA.from_chain_type(llm=llm, retriever=combined), llm
+
+# --- AI質問受付エンドポイント ---
+@app.route("/ask", methods=["POST"])
+def ask():
+    data = request.get_json()
+    user_id = data.get("userId")
+    question = data.get("question", "")
+    if not question:
+        return jsonify({"error": "質問が空です"}), 400
+    profile = get_user_profile(user_id)
+    if not profile["is_paid"]:
+        return "", 204
+    history = get_recent_history(user_id)
+    try:
+        qa_chain, llm = get_qa_chain(profile)
+        answer = qa_chain.run(question)
+        # PDFから拾えなかった場合の判定（例: "申し訳"などが含まれる）
+        if any(x in answer for x in ["申し訳", "お答えできません", "確認できません"]):
+            prompt = (
+                f"ユーザー: {profile['gender']}の方（あなたの性格タイプ） / "
+                f"相手の性格タイプあり\n"
+                f"履歴:\n" + "\n".join(history) + "\n"
+                f"質問: {question}\n"
+                f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
+                f"性格タイプ名は出さず、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。"
+            )
+            answer = llm.invoke(prompt).content
+        save_message(user_id, "user", question)
+        save_message(user_id, "bot", answer)
+        return jsonify({"answer": answer})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     # 環境変数が設定されているか確認
