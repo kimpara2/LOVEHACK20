@@ -13,6 +13,7 @@ import requests
 import zipfile
 import json
 import re
+import traceback
 
 app = Flask(__name__)
 
@@ -416,6 +417,7 @@ def handle_payment_completion(user_id):
 
 # ユーザーメッセージ処理関数
 def process_user_message(user_id, message, user_profile):
+    print(f"[process_user_message] user_id={user_id}, message={message}, user_profile={user_profile}")
     try:
         # 1. 診断モード優先
         if user_profile and user_profile.get('mode') == 'mbti_diagnosis':
@@ -575,9 +577,11 @@ def send_line_reply(reply_token, message):
 
 # AIチャット処理関数
 def process_ai_chat(user_id, message, user_profile):
+    print(f"[process_ai_chat] user_id={user_id}, message={message}, user_profile={user_profile}")
     try:
         if user_profile.get('is_paid', False):
             return ask_ai_with_vector_db(user_id, message, user_profile)
+        print("is_paid False or not found")
         if "こんにちは" in message or "hello" in message.lower():
             return "こんにちは！恋愛の相談があるときはいつでも聞いてね💕"
         elif "ありがとう" in message:
@@ -591,6 +595,7 @@ def process_ai_chat(user_id, message, user_profile):
 # LINE Webhookエンドポイント
 @app.route("/webhook", methods=["POST"])
 def line_webhook():
+    print("[line_webhook] called")
     try:
         # LINEプラットフォームからのリクエストを受け取る
         data = request.get_json()
@@ -856,12 +861,25 @@ def get_recent_history(user_id, limit=5):
 # PDFベクトルDBからRetrieverを取得
 VECTOR_BASE = "chroma_db"
 def get_retrievers(user_profile):
-    sub_paths = [
-        f"self/{user_profile['mbti']}",
-        f"partner/{user_profile['target_mbti']}",
-        user_profile['gender'],
-        "common"
-    ]
+    sub_paths = []
+
+    # self/MBTI（診断済みなら必ず）
+    if user_profile.get('mbti') and user_profile['mbti'] not in [None, '', '不明']:
+        sub_paths.append(f"self/{user_profile['mbti']}")
+
+    # partner/MBTI（登録があれば）
+    if user_profile.get('target_mbti') and user_profile['target_mbti'] not in [None, '', '不明']:
+        sub_paths.append(f"partner/{user_profile['target_mbti']}")
+
+    # gender（男ならman、女ならwoman、未登録なら追加しない）
+    if user_profile.get('gender') == '男':
+        sub_paths.append("man")
+    elif user_profile.get('gender') == '女':
+        sub_paths.append("woman")
+
+    # common（必ず）
+    sub_paths.append("common")
+
     retrievers = []
     for sub in sub_paths:
         path = os.path.join(VECTOR_BASE, sub)
@@ -915,9 +933,12 @@ def upload_db():
 
 # --- AI応答ロジックを関数化 ---
 def ask_ai_with_vector_db(user_id, question, user_profile):
+    print(f"[ask_ai_with_vector_db] user_id={user_id}, question={question}, user_profile={user_profile}")
     if not question:
+        print("question is empty")
         return "質問が空です"
     if not user_profile.get("is_paid"):
+        print("user is not paid")
         return "有料会員のみ利用できます"
     history = get_recent_history(user_id)
     try:
@@ -938,7 +959,14 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
         save_message(user_id, "bot", answer)
         return answer
     except Exception as e:
+        import traceback
+        print("AI応答エラー exceptに入った")
         print(f"AI応答エラー: {e}")
+        # エラー内容をファイルにも書き出す
+        with open("ai_error.log", "a", encoding="utf-8") as f:
+            f.write("AI応答エラー exceptに入った\n")
+            f.write(f"AI応答エラー: {e}\n")
+            f.write(traceback.format_exc() + "\n")
         return "AI応答中にエラーが発生しました。"
 
 if __name__ == '__main__':
