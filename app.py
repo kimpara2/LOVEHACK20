@@ -264,7 +264,7 @@ def process_mbti_answer(user_id, answer, user_profile):
         conn.commit()
         conn.close()
         next_question_index = len(answers)
-
+        
         if next_question_index < 16:
             print(f"次の質問を送信: 質問{next_question_index + 1}/16")
             return send_mbti_question(user_id, next_question_index)
@@ -294,33 +294,6 @@ def complete_mbti_diagnosis(user_id, answers):
         # MBTI計算
         mbti = calc_mbti(answers)
 
-        # 結果を保存（modeは維持して、診断完了メッセージを送信後にリセット）
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET mbti=? WHERE user_id=?", (mbti, user_id))
-        conn.commit()
-        conn.close()
-
-        # 診断結果メッセージのみ（課金誘導なし）
-        result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
-
-        # GASへの詳細アドバイス送信はここでは呼ばない（決済完了時のみ）
-        # send_detailed_advice_to_gas(user_id, mbti)
-
-        return result_message
-
-    except Exception as e:
-        print(f"MBTI診断完了エラー: {e}")
-        return "診断結果の処理中にエラーが発生しました。"
-
-
-# MBTI診断完了関数
-def complete_mbti_diagnosis(user_id, answers):
-    """MBTI診断を完了し、結果を送信"""
-    try:
-        # MBTI計算
-        mbti = calc_mbti(answers)
-        
         # 結果を保存（modeは維持して、診断完了メッセージを送信後にリセット）
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -458,6 +431,13 @@ def process_user_message(user_id, message, user_profile):
     if not user_profile:
         return start_mbti_diagnosis(user_id)
     
+    # 診断モードの確認（最初にチェック）
+    if user_profile.get('mode') == 'mbti_diagnosis':
+        if message in ['はい', 'いいえ']:
+            return process_mbti_answer(user_id, message, user_profile)
+        else:
+            return "【はい】か【いいえ】で答えてね！"
+    
     # 性別登録モードの処理
     if user_profile.get('mode') == 'register_gender':
         if message in ['男', '女']:
@@ -486,13 +466,6 @@ def process_user_message(user_id, message, user_profile):
         else:
             return "正しいMBTI形式（例：INTJ、ENFP）で答えてね！"
     
-    # MBTI診断モードの処理
-    if user_profile.get('mode') == 'mbti_diagnosis':
-        if message in ['はい', 'いいえ']:
-            return process_mbti_answer(user_id, message, user_profile)
-        else:
-            return "【はい】か【いいえ】で答えてね！"
-    
     # 無課金ユーザーの制限（診断中以外は課金誘導）
     if not user_profile.get('is_paid', False):
         if message == "診断開始":
@@ -513,6 +486,9 @@ def process_user_message(user_id, message, user_profile):
             conn.commit()
             conn.close()
             return "相手のMBTIを教えてね！（例：INTJ、ENFP）"
+        elif message in ["はい", "いいえ"]:
+            # 診断中の回答は処理しない（診断モードでない場合）
+            return "診断を開始するには『診断開始』と送ってね！"
         else:
             # 無課金ユーザーは課金誘導メッセージ
             return "📌専属恋愛AIのお喋り機能は有料会員様限定です！\n恋愛傾向診断を始めて有料会員になりたい場合は『診断開始』と送ってね✨"
