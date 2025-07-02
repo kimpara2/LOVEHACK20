@@ -145,9 +145,23 @@ def init_db():
             mbti TEXT,
             gender TEXT,
             target_mbti TEXT,
-            is_paid BOOLEAN DEFAULT 0,
-            mode TEXT DEFAULT '',
-            mbti_answers TEXT DEFAULT '[]'
+            is_paid INTEGER DEFAULT 0,
+            mode TEXT,
+            mbti_answers TEXT
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            user_id TEXT,
+            role TEXT,
+            content TEXT
+        )
+    ''')
+    # Stripe顧客テーブルを追加
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS stripe_customers (
+            user_id TEXT PRIMARY KEY,
+            customer_id TEXT
         )
     ''')
     conn.commit()
