@@ -417,7 +417,8 @@ def handle_payment_completion(user_id):
 
 # ユーザーメッセージ処理関数
 def process_user_message(user_id, message, user_profile):
-    print(f"[process_user_message] user_id={user_id}, message={message}, user_profile={user_profile}")
+    with open("debug.log", "a", encoding="utf-8") as f:
+        f.write(f"[process_user_message] user_id={user_id}, message={message}, user_profile={user_profile}\n")
     try:
         # 1. 診断モード優先
         if user_profile and user_profile.get('mode') == 'mbti_diagnosis':
@@ -577,25 +578,37 @@ def send_line_reply(reply_token, message):
 
 # AIチャット処理関数
 def process_ai_chat(user_id, message, user_profile):
-    print(f"[process_ai_chat] user_id={user_id}, message={message}, user_profile={user_profile}")
+    with open("debug.log", "a", encoding="utf-8") as f:
+        f.write(f"[process_ai_chat] user_id={user_id}, message={message}, user_profile={user_profile}\n")
     try:
         if user_profile.get('is_paid', False):
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write("[process_ai_chat] is_paid True, calling ask_ai_with_vector_db\n")
             return ask_ai_with_vector_db(user_id, message, user_profile)
-        print("is_paid False or not found")
+        with open("debug.log", "a", encoding="utf-8") as f:
+            f.write("[process_ai_chat] is_paid False or not found\n")
         if "こんにちは" in message or "hello" in message.lower():
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write("[process_ai_chat] greeting branch\n")
             return "こんにちは！恋愛の相談があるときはいつでも聞いてね💕"
         elif "ありがとう" in message:
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write("[process_ai_chat] thanks branch\n")
             return "どういたしまして！他にも恋愛の悩みがあれば気軽に相談してね✨"
         else:
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write("[process_ai_chat] default advice branch\n")
             return f"【{user_profile.get('mbti', '不明')}タイプ】のあなたへのアドバイス：\n{message}について詳しく教えてくれると、もっと具体的なアドバイスができるよ！"
     except Exception as e:
-        print(f"AIチャット処理エラー: {e}")
+        with open("debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[process_ai_chat] Exception: {e}\n")
         return "申し訳ありません。エラーが発生しました。時間を置いて再度お試しください。"
 
 # LINE Webhookエンドポイント
 @app.route("/webhook", methods=["POST"])
 def line_webhook():
-    print("[line_webhook] called")
+    with open("debug.log", "a", encoding="utf-8") as f:
+        f.write("[line_webhook] called\n")
     try:
         # LINEプラットフォームからのリクエストを受け取る
         data = request.get_json()
@@ -933,19 +946,25 @@ def upload_db():
 
 # --- AI応答ロジックを関数化 ---
 def ask_ai_with_vector_db(user_id, question, user_profile):
-    print(f"[ask_ai_with_vector_db] user_id={user_id}, question={question}, user_profile={user_profile}")
+    with open("debug.log", "a", encoding="utf-8") as f:
+        f.write(f"[ask_ai_with_vector_db] user_id={user_id}, question={question}, user_profile={user_profile}\n")
     if not question:
-        print("question is empty")
+        with open("debug.log", "a", encoding="utf-8") as f:
+            f.write("[ask_ai_with_vector_db] question is empty\n")
         return "質問が空です"
     if not user_profile.get("is_paid"):
-        print("user is not paid")
+        with open("debug.log", "a", encoding="utf-8") as f:
+            f.write("[ask_ai_with_vector_db] user is not paid\n")
         return "有料会員のみ利用できます"
     history = get_recent_history(user_id)
     try:
         qa_chain, llm = get_qa_chain(user_profile)
         answer = qa_chain.run(question)
-        # PDFから拾えなかった場合の判定
+        with open("debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[ask_ai_with_vector_db] qa_chain answer: {answer}\n")
         if any(x in answer for x in ["申し訳", "お答えできません", "確認できません"]):
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write("[ask_ai_with_vector_db] fallback to LLM prompt\n")
             prompt = (
                 f"ユーザー: {user_profile['gender']}の方（あなたの性格タイプ） / "
                 f"相手の性格タイプあり\n"
@@ -955,17 +974,15 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
                 f"性格タイプ名は出さず、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。"
             )
             answer = llm.invoke(prompt).content
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write(f"[ask_ai_with_vector_db] LLM answer: {answer}\n")
         save_message(user_id, "user", question)
         save_message(user_id, "bot", answer)
         return answer
     except Exception as e:
         import traceback
-        print("AI応答エラー exceptに入った")
-        print(f"AI応答エラー: {e}")
-        # エラー内容をファイルにも書き出す
-        with open("ai_error.log", "a", encoding="utf-8") as f:
-            f.write("AI応答エラー exceptに入った\n")
-            f.write(f"AI応答エラー: {e}\n")
+        with open("debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[ask_ai_with_vector_db] Exception: {e}\n")
             f.write(traceback.format_exc() + "\n")
         return "AI応答中にエラーが発生しました。"
 
