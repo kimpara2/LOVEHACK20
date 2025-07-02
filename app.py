@@ -263,6 +263,7 @@ def process_mbti_answer(user_id, answer, user_profile):
         conn.commit()
         conn.close()
         next_question_index = len(answers)
+
         if next_question_index < 16:
             print(f"次の質問を送信: 質問{next_question_index + 1}/16")
             return send_mbti_question(user_id, next_question_index)
@@ -280,6 +281,7 @@ def process_mbti_answer(user_id, answer, user_profile):
                 {"type": "text", "text": result_message},
                 {"type": "text", "text": payment_message}
             ]
+
     except Exception as e:
         print(f"MBTI回答処理エラー: {e}")
         return "エラーが発生しました。もう一度診断を開始してください。"
