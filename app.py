@@ -561,9 +561,9 @@ def send_line_reply(reply_token, message):
 
 # AIチャット処理関数
 def process_ai_chat(user_id, message, user_profile):
-    """AIチャット処理"""
     try:
-        # 簡単な応答（実際はLangChainを使用）
+        if user_profile.get('is_paid', False):
+            return ask_ai_with_vector_db(user_id, message, user_profile)
         if "こんにちは" in message or "hello" in message.lower():
             return "こんにちは！恋愛の相談があるときはいつでも聞いてね💕"
         elif "ありがとう" in message:
@@ -871,31 +871,13 @@ def ask():
     data = request.get_json()
     user_id = data.get("userId")
     question = data.get("question", "")
+    profile = get_user_profile(user_id)
     if not question:
         return jsonify({"error": "質問が空です"}), 400
-    profile = get_user_profile(user_id)
     if not profile["is_paid"]:
         return "", 204
-    history = get_recent_history(user_id)
-    try:
-        qa_chain, llm = get_qa_chain(profile)
-        answer = qa_chain.run(question)
-        # PDFから拾えなかった場合の判定（例: "申し訳"などが含まれる）
-        if any(x in answer for x in ["申し訳", "お答えできません", "確認できません"]):
-            prompt = (
-                f"ユーザー: {profile['gender']}の方（あなたの性格タイプ） / "
-                f"相手の性格タイプあり\n"
-                f"履歴:\n" + "\n".join(history) + "\n"
-                f"質問: {question}\n"
-                f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
-                f"性格タイプ名は出さず、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。"
-            )
-            answer = llm.invoke(prompt).content
-        save_message(user_id, "user", question)
-        save_message(user_id, "bot", answer)
-        return jsonify({"answer": answer})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    answer = ask_ai_with_vector_db(user_id, question, profile)
+    return jsonify({"answer": answer})
 
 @app.route("/upload_db", methods=["POST"])
 def upload_db():
@@ -916,6 +898,34 @@ def upload_db():
         return jsonify({"message": "データベースファイルが正常にアップロードされました"}), 200
     except Exception as e:
         return jsonify({"error": f"アップロードエラー: {str(e)}"}), 500
+
+# --- AI応答ロジックを関数化 ---
+def ask_ai_with_vector_db(user_id, question, user_profile):
+    if not question:
+        return "質問が空です"
+    if not user_profile.get("is_paid"):
+        return "有料会員のみ利用できます"
+    history = get_recent_history(user_id)
+    try:
+        qa_chain, llm = get_qa_chain(user_profile)
+        answer = qa_chain.run(question)
+        # PDFから拾えなかった場合の判定
+        if any(x in answer for x in ["申し訳", "お答えできません", "確認できません"]):
+            prompt = (
+                f"ユーザー: {user_profile['gender']}の方（あなたの性格タイプ） / "
+                f"相手の性格タイプあり\n"
+                f"履歴:\n" + "\n".join(history) + "\n"
+                f"質問: {question}\n"
+                f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
+                f"性格タイプ名は出さず、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。"
+            )
+            answer = llm.invoke(prompt).content
+        save_message(user_id, "user", question)
+        save_message(user_id, "bot", answer)
+        return answer
+    except Exception as e:
+        print(f"AI応答エラー: {e}")
+        return "AI応答中にエラーが発生しました。"
 
 if __name__ == '__main__':
     # 環境変数が設定されているか確認
