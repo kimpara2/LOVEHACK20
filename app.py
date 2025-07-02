@@ -160,15 +160,17 @@ init_db()
 def get_user_profile(user_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT mbti, gender, target_mbti, is_paid, mode FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT mbti, gender, target_mbti, is_paid, mode, mbti_answers FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
     conn.close()
+    print(f"get_user_profile: user_id={user_id}, row={row}")
     return {
         "mbti": row[0] if row else "不明",
         "gender": row[1] if row else "不明",
         "target_mbti": row[2] if row else "不明",
         "is_paid": bool(row[3]) if row else False,
-        "mode": row[4] if row else ""
+        "mode": row[4] if row else "",
+        "mbti_answers": row[5] if row else ""
     }
 
 # MBTI集計ロジック
@@ -192,29 +194,28 @@ def calc_mbti(answers):
 
 # MBTI診断開始関数
 def start_mbti_diagnosis(user_id):
-    """MBTI診断を開始する"""
     print(f"Starting MBTI diagnosis for user_id: {user_id}")
-    
-    # 診断状態を初期化
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET mode='mbti_diagnosis' WHERE user_id=?", (user_id,))
-    cursor.execute("UPDATE users SET mbti_answers='[]' WHERE user_id=?", (user_id,))
-    
-    # 確認のため、設定後のmodeを取得
+    # ユーザーがいなければINSERT
+    cursor.execute(
+        "INSERT OR IGNORE INTO users (user_id, mode, mbti_answers) VALUES (?, 'mbti_diagnosis', '[]')",
+        (user_id,)
+    )
+    # 必ずmodeとmbti_answersをセット
+    cursor.execute(
+        "UPDATE users SET mode='mbti_diagnosis', mbti_answers='[]' WHERE user_id=?",
+        (user_id,)
+    )
+    conn.commit()
+    # ここで確認
     cursor.execute("SELECT mode FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
     print(f"確認: 設定後のmode = {row[0] if row else 'None'}")
-    
-    conn.commit()
     conn.close()
-    
     print(f"MBTI diagnosis mode set for user_id: {user_id}")
-    
-    # 最初の質問を送信
     first_question = send_mbti_question(user_id, 0)
     print(f"First question generated: {first_question}")
-    
     return first_question
 
 # MBTI質問送信関数（ボタン式）
@@ -251,6 +252,7 @@ def send_mbti_question(user_id, question_index):
 # MBTI回答処理関数
 def process_mbti_answer(user_id, answer, user_profile):
     try:
+        print(f"process_mbti_answer: user_id={user_id}, answer={answer}")
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT mbti_answers FROM users WHERE user_id=?", (user_id,))
@@ -270,7 +272,7 @@ def process_mbti_answer(user_id, answer, user_profile):
         conn.commit()
         conn.close()
         next_question_index = len(answers)
-        
+        print(f"next_question_index: {next_question_index}")
         if next_question_index < 16:
             print(f"次の質問を送信: 質問{next_question_index + 1}/16")
             return send_mbti_question(user_id, next_question_index)
