@@ -200,16 +200,16 @@ def start_mbti_diagnosis(user_id):
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET mode='mbti_diagnosis' WHERE user_id=?", (user_id,))
     cursor.execute("UPDATE users SET mbti_answers='[]' WHERE user_id=?", (user_id,))
-    conn.commit()
-    conn.close()
-    
-    print(f"MBTI diagnosis mode set for user_id: {user_id}")
     
     # 確認のため、設定後のmodeを取得
     cursor.execute("SELECT mode FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
     print(f"確認: 設定後のmode = {row[0] if row else 'None'}")
+    
+    conn.commit()
     conn.close()
+    
+    print(f"MBTI diagnosis mode set for user_id: {user_id}")
     
     # 最初の質問を送信
     first_question = send_mbti_question(user_id, 0)
@@ -401,6 +401,7 @@ def handle_payment_completion(user_id):
 # ユーザーメッセージ処理関数
 def process_user_message(user_id, message, user_profile):
     """ユーザーメッセージを処理して適切な応答を返す"""
+
     
     # 解約ワード検知
     if message in ["解約", "キャンセル", "やめる", "退会"]:
