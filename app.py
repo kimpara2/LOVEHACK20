@@ -270,14 +270,12 @@ def process_mbti_answer(user_id, answer, user_profile):
             print(f"診断完了！全回答: {answers}")
             result_message = complete_mbti_diagnosis(user_id, answers)
             payment_message = get_payment_message(user_id)
-            
             # 診断完了メッセージ送信後にmodeをリセット
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
             conn.commit()
             conn.close()
-            
             return [
                 {"type": "text", "text": result_message},
                 {"type": "text", "text": payment_message}
