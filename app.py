@@ -69,6 +69,9 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 stripe_price_id = os.getenv("STRIPE_PRICE_ID")
 stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
+# 💾 データベースパス設定（環境に応じて切り替え）
+DB_PATH = os.getenv("DB_PATH", "/data/user_data.db")  # 本番環境では永続ディスクを使用
+
 # 🧳 chroma_db.zip を展開（初回起動時）
 if not os.path.exists("./chroma_db") and os.path.exists("./chroma_db.zip"):
     print("chroma_db.zipを展開中...")
@@ -134,7 +137,7 @@ mapping = [
 
 # 💾 SQLite初期化
 def init_db():
-    conn = sqlite3.connect("user_data.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -155,7 +158,7 @@ init_db()
 
 # ユーザープロファイルの取得
 def get_user_profile(user_id):
-    conn = sqlite3.connect("user_data.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT mbti, gender, target_mbti, is_paid FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
@@ -192,7 +195,7 @@ def start_mbti_diagnosis(user_id):
     print(f"Starting MBTI diagnosis for user_id: {user_id}")
     
     # 診断状態を初期化
-    conn = sqlite3.connect("user_data.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET mode='mbti_diagnosis' WHERE user_id=?", (user_id,))
     cursor.execute("UPDATE users SET mbti_answers='[]' WHERE user_id=?", (user_id,))
@@ -241,7 +244,7 @@ def send_mbti_question(user_id, question_index):
 # MBTI回答処理関数
 def process_mbti_answer(user_id, answer, user_profile):
     try:
-        conn = sqlite3.connect("user_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT mbti_answers FROM users WHERE user_id=?", (user_id,))
         row = cursor.fetchone()
@@ -283,7 +286,7 @@ def complete_mbti_diagnosis(user_id, answers):
         mbti = calc_mbti(answers)
         
         # 結果を保存
-        conn = sqlite3.connect("user_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET mbti=?, mode='' WHERE user_id=?", (mbti, user_id))
         conn.commit()
@@ -361,7 +364,7 @@ def handle_payment_completion(user_id):
     """課金完了時の処理"""
     try:
         # ユーザーを有料会員に更新
-        conn = sqlite3.connect("user_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET is_paid=1 WHERE user_id=?", (user_id,))
         conn.commit()
@@ -390,7 +393,7 @@ def process_user_message(user_id, message, user_profile):
         if not user_profile.get('is_paid', False):
             return "この機能は有料会員様限定です。"
         # customer_idをDBから取得
-        conn = sqlite3.connect("user_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT customer_id FROM stripe_customers WHERE user_id=?", (user_id,))
         row = cursor.fetchone()
@@ -423,7 +426,7 @@ def process_user_message(user_id, message, user_profile):
     if user_profile.get('mode') == 'register_gender':
         if message in ['男', '女']:
             # 性別を保存
-            conn = sqlite3.connect("user_data.db")
+            conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET gender=? WHERE user_id=?", (message, user_id))
             cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
@@ -437,7 +440,7 @@ def process_user_message(user_id, message, user_profile):
     if user_profile.get('mode') == 'register_partner_mbti':
         if re.match(r'^[EI][NS][FT][JP]$', message):
             # 相手のMBTIを保存
-            conn = sqlite3.connect("user_data.db")
+            conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET target_mbti=? WHERE user_id=?", (message, user_id))
             cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
@@ -460,7 +463,7 @@ def process_user_message(user_id, message, user_profile):
             return start_mbti_diagnosis(user_id)
         elif message == "性別登録":
             # 性別登録モードに設定
-            conn = sqlite3.connect("user_data.db")
+            conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
             conn.commit()
@@ -468,7 +471,7 @@ def process_user_message(user_id, message, user_profile):
             return "性別を教えてね！【男】か【女】で答えてください。"
         elif message == "相手MBTI登録":
             # 相手MBTI登録モードに設定
-            conn = sqlite3.connect("user_data.db")
+            conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
             conn.commit()
@@ -483,7 +486,7 @@ def process_user_message(user_id, message, user_profile):
         return start_mbti_diagnosis(user_id)
     elif message == "性別登録":
         # 性別登録モードに設定
-        conn = sqlite3.connect("user_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
         conn.commit()
@@ -491,7 +494,7 @@ def process_user_message(user_id, message, user_profile):
         return "性別を教えてね！【男】か【女】で答えてください。"
     elif message == "相手MBTI登録":
         # 相手MBTI登録モードに設定
-        conn = sqlite3.connect("user_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
         conn.commit()
@@ -664,7 +667,8 @@ def line_webhook():
                                 # 診断完了の場合、課金誘導メッセージを別途送信
                                 if "診断完了" in str(response_message):
                                     time.sleep(1)  # 1秒に短縮
-                                    send_payment_message(user_id)
+                                    payment_message = get_payment_message(user_id)
+                                    send_line_reply(reply_token, payment_message)
                         
                         threading.Thread(target=process_next_question).start()
         
@@ -755,7 +759,7 @@ def mbti_collect():
     mbti += "T" if score["T"] >= score["F"] else "F"
     mbti += "J" if score["J"] >= score["P"] else "P"
 
-    conn = sqlite3.connect("user_data.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         REPLACE INTO users (user_id, mbti, gender, target_mbti, is_paid)
@@ -798,7 +802,7 @@ def stripe_webhook():
         # invoice.payment_succeededの場合（customer_idからuser_idを逆引き）
         elif "customer" in obj:
             customer_id = obj["customer"]
-            conn = sqlite3.connect("user_data.db")
+            conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("SELECT user_id FROM stripe_customers WHERE customer_id=?", (customer_id,))
             row = cursor.fetchone()
@@ -814,14 +818,14 @@ def stripe_webhook():
 
 # --- PDF/LLM連携AI応答用の補助関数 ---
 def save_message(user_id, role, content):
-    conn = sqlite3.connect("user_data.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("INSERT INTO messages (user_id, role, content) VALUES (?, ?, ?)", (user_id, role, content))
     conn.commit()
     conn.close()
 
 def get_recent_history(user_id, limit=5):
-    conn = sqlite3.connect("user_data.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT role, content FROM messages WHERE user_id=? ORDER BY rowid DESC LIMIT ?", (user_id, limit))
     rows = cursor.fetchall()
@@ -885,6 +889,26 @@ def ask():
         return jsonify({"answer": answer})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/upload_db", methods=["POST"])
+def upload_db():
+    """一時的なデータベースアップロードエンドポイント"""
+    if 'file' not in request.files:
+        return jsonify({"error": "ファイルがありません"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "ファイルが選択されていません"}), 400
+    
+    if file.filename != 'user_data.db':
+        return jsonify({"error": "user_data.dbファイルのみアップロード可能です"}), 400
+    
+    try:
+        # 永続ディスクに保存
+        file.save('/data/user_data.db')
+        return jsonify({"message": "データベースファイルが正常にアップロードされました"}), 200
+    except Exception as e:
+        return jsonify({"error": f"アップロードエラー: {str(e)}"}), 500
 
 if __name__ == '__main__':
     # 環境変数が設定されているか確認
