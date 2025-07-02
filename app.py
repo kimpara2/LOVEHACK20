@@ -486,9 +486,6 @@ def process_user_message(user_id, message, user_profile):
             conn.commit()
             conn.close()
             return "相手のMBTIを教えてね！（例：INTJ、ENFP）"
-        elif message in ["はい", "いいえ"]:
-            # 診断中の回答は処理しない（診断モードでない場合）
-            return "診断を開始するには『診断開始』と送ってね！"
         else:
             # 無課金ユーザーは課金誘導メッセージ
             return "📌専属恋愛AIのお喋り機能は有料会員様限定です！\n恋愛傾向診断を始めて有料会員になりたい場合は『診断開始』と送ってね✨"
