@@ -299,6 +299,28 @@ def complete_mbti_diagnosis(user_id, answers):
         cursor.execute("UPDATE users SET mbti=? WHERE user_id=?", (mbti, user_id))
         conn.commit()
         conn.close()
+            
+            return [
+                {"type": "text", "text": result_message},
+                {"type": "text", "text": payment_message}
+            ]
+    except Exception as e:
+        print(f"MBTI回答処理エラー: {e}")
+        return "エラーが発生しました。もう一度診断を開始してください。"
+
+# MBTI診断完了関数
+def complete_mbti_diagnosis(user_id, answers):
+    """MBTI診断を完了し、結果を送信"""
+    try:
+        # MBTI計算
+        mbti = calc_mbti(answers)
+        
+        # 結果を保存（modeは維持して、診断完了メッセージを送信後にリセット）
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET mbti=? WHERE user_id=?", (mbti, user_id))
+        conn.commit()
+        conn.close()
         
         # 診断結果メッセージのみ（課金誘導なし）
         result_message = f"🔍診断完了っ！\n\nあなたの恋愛タイプは…\n❤️{MBTI_NICKNAME.get(mbti, mbti)}❤️\n\n{get_mbti_description(mbti)}"
