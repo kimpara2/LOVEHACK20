@@ -205,6 +205,12 @@ def start_mbti_diagnosis(user_id):
     
     print(f"MBTI diagnosis mode set for user_id: {user_id}")
     
+    # 確認のため、設定後のmodeを取得
+    cursor.execute("SELECT mode FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    print(f"確認: 設定後のmode = {row[0] if row else 'None'}")
+    conn.close()
+    
     # 最初の質問を送信
     first_question = send_mbti_question(user_id, 0)
     print(f"First question generated: {first_question}")
@@ -432,7 +438,15 @@ def process_user_message(user_id, message, user_profile):
         return start_mbti_diagnosis(user_id)
     
     # 診断モードの確認（最初にチェック）
+    print(f"=== 診断モード確認 ===")
+    print(f"ユーザーID: {user_id}")
+    print(f"メッセージ: {message}")
+    print(f"ユーザープロファイル: {user_profile}")
+    print(f"現在のモード: {user_profile.get('mode', 'None')}")
+    print(f"=====================")
+    
     if user_profile.get('mode') == 'mbti_diagnosis':
+        print(f"診断モードで処理中: {message}")
         if message in ['はい', 'いいえ']:
             return process_mbti_answer(user_id, message, user_profile)
         else:
