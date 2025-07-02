@@ -400,93 +400,96 @@ def handle_payment_completion(user_id):
 
 # ユーザーメッセージ処理関数
 def process_user_message(user_id, message, user_profile):
-    """ユーザーメッセージを処理して適切な応答を返す"""
+    try:
+        # 1. 診断モード優先
+        if user_profile and user_profile.get('mode') == 'mbti_diagnosis':
+            if message in ['はい', 'いいえ']:
+                return process_mbti_answer(user_id, message, user_profile)
+            else:
+                return "【はい】か【いいえ】で答えてね！"
 
-    
-    # 解約ワード検知
-    if message in ["解約", "キャンセル", "やめる", "退会"]:
-        # まず有料会員かどうか判定
+        # 2. 解約ワード
+        if message in ["解約", "キャンセル", "やめる", "退会"]:
+            if not user_profile.get('is_paid', False):
+                return "この機能は有料会員様限定です。"
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT customer_id FROM stripe_customers WHERE user_id=?", (user_id,))
+            row = cursor.fetchone()
+            customer_id = row[0] if row else None
+            if not customer_id:
+                conn.close()
+                return "ご利用履歴が見つかりませんでした。"
+            try:
+                session = stripe.billing_portal.Session.create(
+                    customer=customer_id,
+                    return_url=os.getenv("BASE_URL", "https://lovehack20.onrender.com") + "/return"
+                )
+                portal_url = session.url
+            except Exception as e:
+                conn.close()
+                print(f"❌ Customer Portal発行エラー: {e}")
+                return "解約ページの発行に失敗しました。時間をおいて再度お試しください。"
+            cursor.execute("UPDATE users SET is_paid=0 WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            return f"ご解約・お支払い管理はこちらから行えます：\n{portal_url}\n\n解約手続きが完了するとAI相談機能も停止します。"
+
+        # 3. 初回ユーザー
+        if not user_profile:
+            return start_mbti_diagnosis(user_id)
+
+        # 4. 性別登録モード
+        if user_profile.get('mode') == 'register_gender':
+            if message in ['男', '女']:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET gender=? WHERE user_id=?", (message, user_id))
+                cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
+                conn.commit()
+                conn.close()
+                return f"性別【{message}】を登録したよ！"
+            else:
+                return "【男】か【女】で答えてね！"
+
+        # 5. 相手MBTI登録モード
+        if user_profile.get('mode') == 'register_partner_mbti':
+            if re.match(r'^[EI][NS][FT][JP]$', message):
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET target_mbti=? WHERE user_id=?", (message, user_id))
+                cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
+                conn.commit()
+                conn.close()
+                return f"相手のMBTI【{message}】を登録したよ！"
+            else:
+                return "正しいMBTI形式（例：INTJ、ENFP）で答えてね！"
+
+        # 6. 無課金ユーザーの制限
         if not user_profile.get('is_paid', False):
-            return "この機能は有料会員様限定です。"
-        # customer_idをDBから取得
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT customer_id FROM stripe_customers WHERE user_id=?", (user_id,))
-        row = cursor.fetchone()
-        customer_id = row[0] if row else None
-        if not customer_id:
-            conn.close()
-            return "ご利用履歴が見つかりませんでした。"
-        # Stripe Customer PortalのURL発行
-        try:
-            session = stripe.billing_portal.Session.create(
-                customer=customer_id,
-                return_url=os.getenv("BASE_URL", "https://lovehack20.onrender.com") + "/return"
-            )
-            portal_url = session.url
-        except Exception as e:
-            conn.close()
-            print(f"❌ Customer Portal発行エラー: {e}")
-            return "解約ページの発行に失敗しました。時間をおいて再度お試しください。"
-        # AI相談フラグをOFF
-        cursor.execute("UPDATE users SET is_paid=0 WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
-        return f"ご解約・お支払い管理はこちらから行えます：\n{portal_url}\n\n解約手続きが完了するとAI相談機能も停止します。"
-    
-    # 初回ユーザーの場合、自動的に診断開始
-    if not user_profile:
-        return start_mbti_diagnosis(user_id)
-    
-    # 診断モードの確認（最初にチェック）
-    print(f"=== 診断モード確認 ===")
-    print(f"ユーザーID: {user_id}")
-    print(f"メッセージ: {message}")
-    print(f"ユーザープロファイル: {user_profile}")
-    print(f"現在のモード: {user_profile.get('mode', 'None')}")
-    print(f"=====================")
-    
-    if user_profile.get('mode') == 'mbti_diagnosis':
-        print(f"診断モードで処理中: {message}")
-        if message in ['はい', 'いいえ']:
-            return process_mbti_answer(user_id, message, user_profile)
-        else:
-            return "【はい】か【いいえ】で答えてね！"
-    
-    # 性別登録モードの処理
-    if user_profile.get('mode') == 'register_gender':
-        if message in ['男', '女']:
-            # 性別を保存
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET gender=? WHERE user_id=?", (message, user_id))
-            cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
-            conn.commit()
-            conn.close()
-            return f"性別【{message}】を登録したよ！"
-        else:
-            return "【男】か【女】で答えてね！"
-    
-    # 相手のMBTI登録モードの処理
-    if user_profile.get('mode') == 'register_partner_mbti':
-        if re.match(r'^[EI][NS][FT][JP]$', message):
-            # 相手のMBTIを保存
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET target_mbti=? WHERE user_id=?", (message, user_id))
-            cursor.execute("UPDATE users SET mode='' WHERE user_id=?", (user_id,))
-            conn.commit()
-            conn.close()
-            return f"相手のMBTI【{message}】を登録したよ！"
-        else:
-            return "正しいMBTI形式（例：INTJ、ENFP）で答えてね！"
-    
-    # 無課金ユーザーの制限（診断中以外は課金誘導）
-    if not user_profile.get('is_paid', False):
+            if message == "診断開始":
+                return start_mbti_diagnosis(user_id)
+            elif message == "性別登録":
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
+                conn.commit()
+                conn.close()
+                return "性別を教えてね！【男】か【女】で答えてください。"
+            elif message == "相手MBTI登録":
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
+                conn.commit()
+                conn.close()
+                return "相手のMBTIを教えてね！（例：INTJ、ENFP）"
+            else:
+                return "📌専属恋愛AIのお喋り機能は有料会員様限定です！\n恋愛傾向診断を始めて有料会員になりたい場合は『診断開始』と送ってね✨"
+
+        # 7. 有料ユーザーの通常処理
         if message == "診断開始":
             return start_mbti_diagnosis(user_id)
         elif message == "性別登録":
-            # 性別登録モードに設定
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
@@ -494,7 +497,6 @@ def process_user_message(user_id, message, user_profile):
             conn.close()
             return "性別を教えてね！【男】か【女】で答えてください。"
         elif message == "相手MBTI登録":
-            # 相手MBTI登録モードに設定
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
@@ -502,31 +504,10 @@ def process_user_message(user_id, message, user_profile):
             conn.close()
             return "相手のMBTIを教えてね！（例：INTJ、ENFP）"
         else:
-            # 無課金ユーザーは課金誘導メッセージ
-            return "📌専属恋愛AIのお喋り機能は有料会員様限定です！\n恋愛傾向診断を始めて有料会員になりたい場合は『診断開始』と送ってね✨"
-    
-    # 有料ユーザーの通常処理
-    if message == "診断開始":
-        return start_mbti_diagnosis(user_id)
-    elif message == "性別登録":
-        # 性別登録モードに設定
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
-        return "性別を教えてね！【男】か【女】で答えてください。"
-    elif message == "相手MBTI登録":
-        # 相手MBTI登録モードに設定
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET mode='register_partner_mbti' WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
-        return "相手のMBTIを教えてね！（例：INTJ、ENFP）"
-    else:
-        # AIチャット処理
-        return process_ai_chat(user_id, message, user_profile)
+            return process_ai_chat(user_id, message, user_profile)
+    except Exception as e:
+        print(f"process_user_message エラー: {e}")
+        return "エラーが発生しました。もう一度お試しください。"
 
 # LINEリプライ送信関数
 def send_line_reply(reply_token, message):
