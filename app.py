@@ -160,14 +160,15 @@ init_db()
 def get_user_profile(user_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT mbti, gender, target_mbti, is_paid FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT mbti, gender, target_mbti, is_paid, mode FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
     conn.close()
     return {
         "mbti": row[0] if row else "不明",
         "gender": row[1] if row else "不明",
         "target_mbti": row[2] if row else "不明",
-        "is_paid": bool(row[3]) if row else False
+        "is_paid": bool(row[3]) if row else False,
+        "mode": row[4] if row else ""
     }
 
 # MBTI集計ロジック
