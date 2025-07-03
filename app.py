@@ -526,7 +526,9 @@ def process_user_message(user_id, message, user_profile):
         else:
             return process_ai_chat(user_id, message, user_profile)
     except Exception as e:
+        import traceback
         print(f"process_user_message エラー: {e}")
+        traceback.print_exc()
         return "エラーが発生しました。もう一度お試しください。"
 
 # LINEリプライ送信関数
@@ -602,8 +604,11 @@ def process_ai_chat(user_id, message, user_profile):
                 f.write("[process_ai_chat] default advice branch\n")
             return f"【{user_profile.get('mbti', '不明')}タイプ】のあなたへのアドバイス：\n{message}について詳しく教えてくれると、もっと具体的なアドバイスができるよ！"
     except Exception as e:
+        import traceback
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[process_ai_chat] Exception: {e}\n")
+            f.write(traceback.format_exc() + "\n")
+        traceback.print_exc()
         return "申し訳ありません。エラーが発生しました。時間を置いて再度お試しください。"
 
 # LINE Webhookエンドポイント
@@ -988,6 +993,7 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[ask_ai_with_vector_db] Exception: {e}\n")
             f.write(traceback.format_exc() + "\n")
+        traceback.print_exc()
         return "AI応答中にエラーが発生しました。"
 
 if __name__ == '__main__':
