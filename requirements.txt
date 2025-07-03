@@ -1,5 +1,5 @@
 langchain==0.0.320
-openai==1.10.0
+openai==0.28.1
 tiktoken==0.5.2
 chromadb==0.4.15
 pydantic==1.10.13
