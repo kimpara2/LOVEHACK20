@@ -915,16 +915,16 @@ def get_retrievers(user_profile):
 
 def get_qa_chain(user_profile):
     retrievers = get_retrievers(user_profile)
+    print("retrievers len:", len(retrievers))
     if not retrievers:
         raise ValueError("該当するベクトルDBが見つかりません")
     retriever = retrievers[0]
-    try:
-        print("=== retriever type:", type(retriever), "===")
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
-        return RetrievalQA.from_chain_type(llm=llm, retriever=retriever), llm
-    except Exception as e:
-        print("=== retriever type (error):", type(retriever), "===")
-        raise
+    print("=== retriever type:", type(retriever), "===")
+    print("=== retriever repr:", repr(retriever), "===")
+    with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
+        f.write(f"retriever type: {type(retriever)}\n")
+    llm = ChatOpenAI(openai_api_key=openai_api_key)
+    return RetrievalQA.from_chain_type(llm=llm, retriever=retriever), llm
 
 # --- AI質問受付エンドポイント ---
 @app.route("/ask", methods=["POST"])
