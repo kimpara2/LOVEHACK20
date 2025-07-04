@@ -917,7 +917,8 @@ def get_qa_chain(user_profile):
     retrievers = get_retrievers(user_profile)
     if not retrievers:
         raise ValueError("該当するベクトルDBが見つかりません")
-    retriever = retrievers[0]  # まずは一つだけ使う
+    retriever = retrievers[0]
+    print("retriever type:", type(retriever))
     llm = ChatOpenAI(openai_api_key=openai_api_key)
     return RetrievalQA.from_chain_type(llm=llm, retriever=retriever), llm
 
