@@ -977,24 +977,24 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
         return "有料会員のみ利用できます"
     history = get_recent_history(user_id)
     try:
-        qa_chain, llm = get_qa_chain(user_profile)
-        answer = qa_chain.run(question)
+        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        # ユーザー情報をプロンプトに組み込む
+        user_info = (
+            f"あなたのMBTI: {user_profile.get('mbti', '不明')}, "
+            f"あなたの性別: {user_profile.get('gender', '不明')}, "
+            f"相手のMBTI: {user_profile.get('target_mbti', '不明')}, "
+        )
+        prompt = (
+            f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
+            f"ユーザー情報: {user_info}\n"
+            f"履歴:\n" + "\n".join(history) + "\n"
+            f"質問: {question}\n"
+            f"MBTI名は出さず、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。\n"
+            f"450文字から500文字以内で具体的な例なども出しながらアドバイスしてください。"
+        )
+        answer = llm.invoke(prompt).content
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[ask_ai_with_vector_db] qa_chain answer: {answer}\n")
-        if any(x in answer for x in ["申し訳", "お答えできません", "確認できません"]):
-            with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-                f.write("[ask_ai_with_vector_db] fallback to LLM prompt\n")
-            prompt = (
-                f"ユーザー: {user_profile['gender']}の方（あなたの性格タイプ） / "
-                f"相手の性格タイプあり\n"
-                f"履歴:\n" + "\n".join(history) + "\n"
-                f"質問: {question}\n"
-                f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
-                f"性格タイプ名は出さず、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。"
-            )
-            answer = llm.invoke(prompt).content
-            with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-                f.write(f"[ask_ai_with_vector_db] LLM answer: {answer}\n")
+            f.write(f"[ask_ai_with_vector_db] LLM only answer: {answer}\n")
         save_message(user_id, "user", question)
         save_message(user_id, "bot", answer)
         return answer
