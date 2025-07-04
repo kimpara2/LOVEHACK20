@@ -579,6 +579,43 @@ def send_line_reply(reply_token, message):
     except Exception as e:
         print(f"LINE送信エラー: {e}")
 
+def classify_intent(message):
+    """メッセージの意図を分類"""
+    try:
+        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        prompt = (
+            "次の発言の意図を判定してください。\n"
+            "1: 挨拶（こんにちは、おはよう、hi等）\n"
+            "2: 感謝（ありがとう、thanks等）\n"
+            "3: 短い返事（わかった、うん、はい等）\n"
+            "4: 恋愛相談（恋愛、相手、デート等に関する質問）\n"
+            "5: 雑談（天気、趣味、日常会話等）\n"
+            "6: その他\n"
+            "番号のみ返してください。"
+        )
+        
+        response = llm.invoke(f"{prompt}\n\n発言: {message}")
+        return int(response.content.strip())
+    except:
+        return 6  # デフォルトは「その他」
+
+def handle_casual_chat(user_id, message, user_profile):
+    """雑談処理"""
+    try:
+        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        prompt = (
+            f"あなたはMBTI診断ベースの女性の恋愛マスターの友達です。\n"
+            f"ユーザー情報: あなたのMBTI: {user_profile.get('mbti', '不明')}, あなたの性別: {user_profile.get('gender', '不明')}\n"
+            f"ユーザーの発言: {message}\n"
+            f"これは雑談です。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。\n"
+            f"恋愛アドバイスではなく、日常会話として返してください。"
+        )
+        
+        response = llm.invoke(prompt)
+        return response.content
+    except Exception as e:
+        return "うん、そうだね！😊"
+
 # AIチャット処理関数
 def process_ai_chat(user_id, message, user_profile):
     os.makedirs("/data/logs", exist_ok=True)
@@ -587,8 +624,26 @@ def process_ai_chat(user_id, message, user_profile):
     try:
         if user_profile.get('is_paid', False):
             with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-                f.write("[process_ai_chat] is_paid True, calling ask_ai_with_vector_db\n")
-            return ask_ai_with_vector_db(user_id, message, user_profile)
+                f.write("[process_ai_chat] is_paid True, calling intent classification\n")
+            
+            # 意図分類
+            intent = classify_intent(message)
+            with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
+                f.write(f"[process_ai_chat] intent classified as: {intent}\n")
+            
+            if intent == 1:  # 挨拶
+                return "こんばんは！今日も気軽に話してね😊"
+            elif intent == 2:  # 感謝
+                return "どういたしまして！また何でも聞いてね✨"
+            elif intent == 3:  # 短い返事
+                return "うん、また何かあったら教えてね！"
+            elif intent == 4:  # 恋愛相談
+                return ask_ai_with_vector_db(user_id, message, user_profile)
+            elif intent == 5:  # 雑談
+                return handle_casual_chat(user_id, message, user_profile)
+            else:  # その他（恋愛相談として処理）
+                return ask_ai_with_vector_db(user_id, message, user_profile)
+        
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write("[process_ai_chat] is_paid False or not found\n")
         if "こんにちは" in message or "hello" in message.lower():
