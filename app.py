@@ -882,17 +882,18 @@ def get_recent_history(user_id, limit=5):
 # PDFベクトルDBからRetrieverを取得
 VECTOR_BASE = "chroma_db"
 def get_retrievers(user_profile):
+    import os
     sub_paths = []
 
-    # self/MBTI（診断済みなら必ず）
+    # self/MBTI
     if user_profile.get('mbti') and user_profile['mbti'] not in [None, '', '不明']:
         sub_paths.append(f"self/{user_profile['mbti']}")
 
-    # partner/MBTI（登録があれば）
+    # partner/MBTI
     if user_profile.get('target_mbti') and user_profile['target_mbti'] not in [None, '', '不明']:
         sub_paths.append(f"partner/{user_profile['target_mbti']}")
 
-    # gender（男ならman、女ならwoman、未登録なら追加しない）
+    # gender
     if user_profile.get('gender') == '男':
         sub_paths.append("man")
     elif user_profile.get('gender') == '女':
@@ -903,20 +904,22 @@ def get_retrievers(user_profile):
 
     retrievers = []
     for sub in sub_paths:
-        path = os.path.join(VECTOR_BASE, sub)
-        if os.path.exists(path):
-            # Chromaのロード方法は環境依存なので、ここは仮の例
-            retrievers.append(Chroma(persist_directory=path, embedding_function=OpenAIEmbeddings()))
+        base_path = os.path.join(VECTOR_BASE, sub)
+        if os.path.exists(base_path):
+            # PDFごとの全ディレクトリを対象にする
+            for pdf_dir in os.listdir(base_path):
+                pdf_path = os.path.join(base_path, pdf_dir)
+                if os.path.isdir(pdf_path):
+                    retrievers.append(Chroma(persist_directory=pdf_path, embedding_function=OpenAIEmbeddings()))
     return retrievers
 
 def get_qa_chain(user_profile):
-    from langchain.retrievers import EnsembleRetriever
     retrievers = get_retrievers(user_profile)
     if not retrievers:
         raise ValueError("該当するベクトルDBが見つかりません")
-    combined = EnsembleRetriever(retrievers=retrievers)
+    retriever = retrievers[0]  # まずは一つだけ使う
     llm = ChatOpenAI(openai_api_key=openai_api_key)
-    return RetrievalQA.from_chain_type(llm=llm, retriever=combined), llm
+    return RetrievalQA.from_chain_type(llm=llm, retriever=retriever), llm
 
 # --- AI質問受付エンドポイント ---
 @app.route("/ask", methods=["POST"])
