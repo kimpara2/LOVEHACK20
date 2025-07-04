@@ -985,12 +985,14 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
             f"相手のMBTI: {user_profile.get('target_mbti', '不明')}, "
         )
         prompt = (
-            f"あなたはMBTI診断ベースの恋愛アドバイザーです。\n"
+            f"あなたはMBTI診断ベースの女性の恋愛マスターの友達です。\n"
             f"ユーザー情報: {user_info}\n"
             f"履歴:\n" + "\n".join(history) + "\n"
             f"質問: {question}\n"
-            f"MBTI名は出さず、親しみやすくタメ口で絵文字なども使ってわかりやすくアドバイスしてください。\n"
-            f"450文字から500文字以内で具体的な例なども出しながらアドバイスしてください。"
+            f"【重要】絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください。\n"
+            f"ユーザーのMBTIの特徴を活かした具体的で実践的なアドバイスをしてください。\n"
+            f"親しみやすくタメ口で絵文字も多めに使って、回答してください。\n"
+            f"具体的な例やシチュエーションも含めて、その人らしいアプローチ方法を教えてください。"
         )
         answer = llm.invoke(prompt).content
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
