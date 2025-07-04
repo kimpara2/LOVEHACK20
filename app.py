@@ -584,18 +584,27 @@ def classify_intent(message):
     try:
         llm = ChatOpenAI(openai_api_key=openai_api_key)
         prompt = (
-            "次の発言の意図を判定してください。\n"
-            "1: 挨拶（こんにちは、こんばんは、おはよう、おやすみ、hi、hello、お疲れ様等、時間帯や状況を問わない挨拶の言葉）\n"
-            "2: 感謝（ありがとう、thanks、thx、どうも等）\n"
-            "3: 短い返事（わかった、うん、はい、了解、ok等）\n"
-            "4: 恋愛相談（恋愛、相手、デート、告白、LINE、付き合う等に関する質問や相談）\n"
-            "5: 雑談（天気、趣味、日常会話、仕事、学校等の一般的な話題）\n"
-            "番号のみ返してください。"
+            "Classify the following message into one of these categories:\n"
+            "1: Greeting (hello, hi, good morning, good evening, こんにちは, こんばんは, おはよう, おやすみ, etc.)\n"
+            "2: Thanks (thank you, thanks, ありがとう, どうも, etc.)\n"
+            "3: Short reply (ok, yes, got it, わかった, うん, はい, 了解, etc.)\n"
+            "4: Love advice (questions about love, dating, relationships, 恋愛, 相手, デート, 告白, etc.)\n"
+            "5: Casual chat (weather, hobbies, daily conversation, 天気, 趣味, 日常会話, etc.)\n"
+            "6: Other\n"
+            "Return only the number (1-6)."
         )
         
-        response = llm.invoke(f"{prompt}\n\n発言: {message}")
-        return int(response.content.strip())
-    except:
+        response = llm.invoke(f"{prompt}\n\nMessage: {message}")
+        result = int(response.content.strip())
+        
+        # デバッグログを追加
+        with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[classify_intent] message: {message}, response: {response.content}, result: {result}\n")
+        
+        return result
+    except Exception as e:
+        with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[classify_intent] error: {e}\n")
         return 6  # デフォルトは「その他」
 
 def handle_casual_chat(user_id, message, user_profile):
