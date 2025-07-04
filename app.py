@@ -910,7 +910,9 @@ def get_retrievers(user_profile):
             for pdf_dir in os.listdir(base_path):
                 pdf_path = os.path.join(base_path, pdf_dir)
                 if os.path.isdir(pdf_path):
-                    retrievers.append(Chroma(persist_directory=pdf_path, embedding_function=OpenAIEmbeddings()))
+                    retrievers.append(
+                        Chroma(persist_directory=pdf_path, embedding_function=OpenAIEmbeddings()).as_retriever()
+                    )
     return retrievers
 
 def get_qa_chain(user_profile):
