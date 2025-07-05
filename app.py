@@ -2975,7 +2975,7 @@ def classify_intent(message):
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[classify_intent] error: {e}\n")
         message_lower = message.lower()
-        if any(word in message_lower for word in ['こんにちは', 'こんばんは', 'おはよう', 'おやすみ', 'hello', 'hi', 'good morning', 'good evening']):
+        if any(word in message_lower for word in ['こんにちは', 'こんばんは', 'おはよう', 'おはよ', 'おやすみ', 'hello', 'hi', 'good morning', 'good evening']):
             return 1
         elif any(word in message_lower for word in ['ありがとう', 'どうも', 'thank you', 'thanks']):
             return 2
@@ -3097,7 +3097,7 @@ def process_ai_chat(user_id, message, user_profile):
         
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write("[process_ai_chat] is_paid False or not found\n")
-        if "こんにちは" in message or "hello" in message.lower():
+        if any(word in message.lower() for word in ["こんにちは", "こんばんは", "おはよう", "おはよ", "hello", "hi"]):
             with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
                 f.write("[process_ai_chat] greeting branch\n")
             free_greeting_responses = [
@@ -3540,9 +3540,50 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
             )
             answer = response.choices[0].message.content
         except Exception as e:
-            # APIエラー時のフォールバック
-            answer = f"【{question_type}】についてのアドバイス：\n{question}について詳しく教えてくれると、もっと具体的なアドバイスができるよ！"
+            # APIエラー時のフォールバック - 質問タイプに応じた応答
             print(f"OpenAI API エラー: {e}")
+            
+            # 質問タイプに応じたフォールバック応答
+            user_mbti = user_profile.get('mbti', '不明')
+            target_mbti = user_profile.get('target_mbti', '不明')
+            user_personality = MBTI_PERSONALITY.get(user_mbti, {})
+            target_personality = MBTI_PERSONALITY.get(target_mbti, {})
+            
+            # MBTI別の具体的なアドバイスを生成
+            def get_mbti_specific_advice(question_type, user_mbti, target_mbti):
+                if question_type == "方法論・アプローチ":
+                    if user_mbti in ["INTJ", "INTP", "ENTJ", "ENTP"]:
+                        return f"【{question}】について、あなたの論理的思考を活かした段階的なアプローチを提案するね！\n\n1️⃣ まず現状を分析して、目標を明確にする\n2️⃣ 相手のMBTIタイプ（{target_mbti}）の特徴を考慮した計画を立てる\n3️⃣ 論理的に説明しながら、相手の理解を深める\n4️⃣ 結果を評価して、必要に応じて調整する\n\nあなたの分析力と計画性を活かせば、きっとうまくいくよ✨"
+                    elif user_mbti in ["INFJ", "INFP", "ENFJ", "ENFP"]:
+                        return f"【{question}】について、あなたの共感力と創造性を活かしたアプローチを提案するね！\n\n1️⃣ 相手の気持ちを理解し、共感を示す\n2️⃣ 創造的なアイデアで相手を驚かせる\n3️⃣ 相手のMBTIタイプ（{target_mbti}）に合わせた柔軟な対応をする\n4️⃣ 感情的なつながりを大切にしながら進める\n\nあなたの優しさと創造性が、きっと相手の心を動かすよ💕"
+                    else:
+                        return f"【{question}】について、あなたの実践的な性格を活かしたアプローチを提案するね！\n\n1️⃣ 具体的で実現可能な目標を設定する\n2️⃣ 相手のMBTIタイプ（{target_mbti}）の好みを考慮した方法を選ぶ\n3️⃣ 段階的に実行して、相手の反応を見ながら調整する\n4️⃣ 結果を重視しながら、関係を深めていく\n\nあなたの実践力と相手への配慮が成功の鍵だよ✨"
+                
+                elif question_type == "LINE・メッセージ":
+                    line_examples = user_personality.get('line_examples', [])
+                    if line_examples:
+                        return f"【{question}】について、あなたのMBTIタイプに合ったLINEメッセージ例を提案するね！\n\n💬 おすすめメッセージ例：\n{random.choice(line_examples)}\n\n相手のMBTIタイプ（{target_mbti}）の特徴も考慮して、相手が喜ぶメッセージを送ってみてね✨"
+                    else:
+                        return f"【{question}】について、あなたの性格に合ったLINEメッセージを提案するね！\n\n相手のMBTIタイプ（{target_mbti}）の好みを考慮して、相手が興味を持ちそうな話題から始めてみて。あなたらしい自然なメッセージが一番効果的だよ💕"
+                
+                elif question_type == "場所・デートプラン":
+                    favorite_dates = user_personality.get('favorite_dates', [])
+                    if favorite_dates:
+                        return f"【{question}】について、あなたの好みに合ったデートプランを提案するね！\n\n🎯 おすすめのデート場所：\n• {random.choice(favorite_dates)}\n• {random.choice(favorite_dates) if len(favorite_dates) > 1 else 'あなたの興味に合った場所'}\n\n相手のMBTIタイプ（{target_mbti}）の特徴も考慮して、二人が楽しめる場所を選んでみてね✨"
+                    else:
+                        return f"【{question}】について、あなたと相手のMBTIタイプ（{target_mbti}）に合ったデートプランを提案するね！\n\n相手の好みを考慮しながら、あなたも楽しめる場所を選ぶことが大切だよ💕"
+                
+                elif question_type == "関係性・告白":
+                    confession_examples = user_personality.get('confession_examples', [])
+                    if confession_examples:
+                        return f"【{question}】について、あなたのMBTIタイプに合った告白方法を提案するね！\n\n💝 おすすめの告白例：\n{random.choice(confession_examples)}\n\n相手のMBTIタイプ（{target_mbti}）の特徴も考慮して、相手が受け入れやすい方法で告白してみてね✨"
+                    else:
+                        return f"【{question}】について、あなたの性格に合った告白方法を提案するね！\n\n相手のMBTIタイプ（{target_mbti}）の好みを考慮して、相手が安心できる環境で、あなたらしい方法で告白してみて💕"
+                
+                else:
+                    return f"【{question}】について、あなたのMBTIタイプ（{user_mbti}）と相手のMBTIタイプ（{target_mbti}）を考慮したアドバイスをするね！\n\nあなたの性格特徴を活かしながら、相手の好みも理解して、二人の相性に合ったアプローチを心がけてみてね✨"
+            
+            answer = get_mbti_specific_advice(question_type, user_mbti, target_mbti)
         
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[ask_ai_with_vector_db] ChatGPT answer: {answer}\n")
