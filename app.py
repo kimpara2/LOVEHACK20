@@ -3619,8 +3619,10 @@ def generate_personalized_advice(user_profile, question, history):
     if history:
         recent_topics = []
         for msg in history[-3:]:  # 最近3つのメッセージを分析
-            if "user" in msg and len(msg["user"]) > 10:
-                recent_topics.append(msg["user"][:50] + "...")
+            if "user:" in msg and len(msg) > 15:
+                # "user: メッセージ内容" の形式から内容を抽出
+                content = msg.split("user: ", 1)[1] if "user: " in msg else msg
+                recent_topics.append(content[:50] + "..." if len(content) > 50 else content)
         if recent_topics:
             history_insights = f"最近の相談内容: {', '.join(recent_topics)}"
     
