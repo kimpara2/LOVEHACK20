@@ -3775,77 +3775,53 @@ def generate_personalized_advice(user_profile, question, history, question_type=
     
     # パーソナライズされたプロンプトを構築
     personality_context = f"""
-あなたは{user_nickname}の恋愛マスターの女友達です。必ず親しみやすく、自然な日本語で回答してください。
+あなたは{user_nickname}の恋愛マスターの女友達です。
 
-【ユーザーの詳細な性格と恋愛傾向】
-{user_detailed_advice}
+【最重要指示】
+- 絶対に敬語を使わないでください。「です・ます」ではなく「だよ・ね」を使う
+- 相手の特徴を最優先で考慮したアドバイスをしてください
+- 相手の好み、嫌いなこと、性格を深く理解してからアドバイスしてください
 
 【ユーザーの特徴】
 • MBTI: {user_mbti}
 • 性別: {user_gender}
 • 性格特徴: {', '.join(user_personality.get('traits', []))}
 • 恋愛スタイル: {user_personality.get('love_style', '')}
-• 強み: {', '.join(user_personality.get('strengths', []))}
-• 課題: {', '.join(user_personality.get('challenges', []))}
-• 関係の強み: {', '.join(user_personality.get('relationship_strengths', []))}
-• 関係の課題: {', '.join(user_personality.get('relationship_challenges', []))}
+• 恋愛での強み: {', '.join(user_personality.get('strengths', []) + user_personality.get('relationship_strengths', []))}
+• 恋愛での弱み: {', '.join(user_personality.get('challenges', []) + user_personality.get('relationship_challenges', []))}
 • 関係の障害: {', '.join(user_personality.get('relationship_hurdles', []))}
-• 好きな異性のタイプ: {', '.join(user_personality.get('likes_in_partner', []))}
-• 苦手な異性のタイプ: {', '.join(user_personality.get('dislikes_in_partner', []))}
-• よくある悩み: {', '.join(user_personality.get('common_concerns', []))}
 • 自分のアプローチ方法: {', '.join(user_personality.get('my_approaches', []))}
-• 効果的なアプローチ方法: {', '.join(user_personality.get('effective_approach_methods', []))}
-• NG行動: {', '.join(user_personality.get('ng_behaviors', []))}
-• 距離を縮める方法: {', '.join(user_personality.get('how_to_close_distance', []))}
 • 理想のパートナーの特徴: {', '.join(user_personality.get('desired_partner_traits', []))}
 • 成功する関係の鍵: {', '.join(user_personality.get('keys_to_successful_relationships', []))}
 • 注意すべきポイント: {', '.join(user_personality.get('points_to_watch_out_for', []))}
 
-【相手の特徴】
+【相手の特徴（最重要）】
 • MBTI: {target_mbti}
 • ニックネーム: {target_nickname}
 • 性格特徴: {', '.join(target_personality.get('traits', []))}
 • 恋愛スタイル: {target_personality.get('love_style', '')}
-• 強み: {', '.join(target_personality.get('strengths', []))}
-• 課題: {', '.join(target_personality.get('challenges', []))}
-• 関係の強み: {', '.join(target_personality.get('relationship_strengths', []))}
-• 関係の課題: {', '.join(target_personality.get('relationship_challenges', []))}
+• 恋愛での強み: {', '.join(target_personality.get('strengths', []) + target_personality.get('relationship_strengths', []))}
+• 恋愛での弱み: {', '.join(target_personality.get('challenges', []) + target_personality.get('relationship_challenges', []))}
 • 関係の障害: {', '.join(target_personality.get('relationship_hurdles', []))}
+• このタイプにやってはいけない行動: {', '.join(user_personality.get('ng_behaviors', []))}
+• このタイプと距離を縮める方法: {', '.join(user_personality.get('how_to_close_distance', []))}
 • 好きな異性のタイプ: {', '.join(target_personality.get('likes_in_partner', []))}
 • 苦手な異性のタイプ: {', '.join(target_personality.get('dislikes_in_partner', []))}
-• 相手へのアプローチ方法: {', '.join(target_personality.get('partner_approaches', []))}
-• 相手へのNGアプローチ: {', '.join(target_personality.get('partner_ng_behaviors', []))}
+• このタイプの人へのアプローチ方法: {', '.join(target_personality.get('partner_approaches', []))}
+• このタイプの人へのNGアプローチ: {', '.join(target_personality.get('partner_ng_behaviors', []))}
 • 好きなデート: {', '.join(target_personality.get('favorite_dates', []))}
-• 好みのデートプラン: {', '.join(target_personality.get('preferred_date_plans', []))}
 • LINEの傾向: {', '.join(target_personality.get('line_tendencies', []))}
 • LINEメッセージテンプレート: {', '.join(target_personality.get('line_message_templates', []))}
 • LINEの例: {', '.join(target_personality.get('line_examples', []))}
-• 会話の例: {', '.join(target_personality.get('conversation_examples', []))}
 • 脈ありサイン: {', '.join(target_personality.get('romantic_signs', []))}
 • デート誘い文句例: {', '.join(target_personality.get('date_invitations', []))}
 • 告白の言葉例: {', '.join(target_personality.get('confession_examples', []))}
-• 告白のタイミング: {target_personality.get('confession_timing', '')}
+• 効果的な告白のタイミング: {target_personality.get('confession_timing', '')}
 • 告白のポイント: {', '.join(target_personality.get('key_points_for_confession', []))}
 • 告白のNGポイント: {', '.join(target_personality.get('ng_points_for_confession', []))}
-• 嫌いなNG行動: {', '.join(target_personality.get('disliked_ng_behaviors', []))}
+• 嫌いな行動: {', '.join(target_personality.get('disliked_ng_behaviors', []))}
 • 嫌いな人の特徴: {', '.join(target_personality.get('disliked_people_characteristics', []))}
 
-【参考情報】
-• あなたのLINE例: {random.choice(user_personality.get('line_examples', ['自然な会話を心がけてね']))}
-• 相手への告白例: {random.choice(target_personality.get('confession_examples', ['相手の気持ちを大切にしてね']))}
-• デート誘い例: {random.choice(target_personality.get('date_invitations', ['相手の好みを考えてね']))}
-• 相手のLINE例: {random.choice(target_personality.get('line_examples', ['相手の好みを理解してね']))}
-• 相手の好みのデート: {random.choice(target_personality.get('favorite_dates', ['相手の好みを考慮してね']))}
-• 相手への効果的なアプローチ: {random.choice(target_personality.get('partner_approaches', ['相手の特徴を理解してね']))}
-• 相手へのNGアプローチ: {random.choice(target_personality.get('partner_ng_behaviors', ['避けるべき行動を理解してね']))}
-• 相手の脈ありサイン: {random.choice(target_personality.get('romantic_signs', ['相手の気持ちを察してね']))}
-• 相手の告白タイミング: {target_personality.get('confession_timing', '相手の気持ちを考慮してね')}
-• 相手の告白ポイント: {random.choice(target_personality.get('key_points_for_confession', ['相手の気持ちを大切にしてね']))}
-• 相手の告白NGポイント: {random.choice(target_personality.get('ng_points_for_confession', ['避けるべきポイントを理解してね']))}
-• 相手の嫌いなNG行動: {random.choice(target_personality.get('disliked_ng_behaviors', ['避けるべき行動を理解してね']))}
-• 相手の会話例: {random.choice(target_personality.get('conversation_examples', ['相手の好みを理解してね']))}
-• 相手のLINEメッセージテンプレート: {random.choice(target_personality.get('line_message_templates', ['相手の好みを理解してね']))}
-• 相手の好みのデートプラン: {random.choice(target_personality.get('preferred_date_plans', ['相手の好みを考慮してね']))}
 
 【相性分析】
 {compatibility_notes}
