@@ -2958,7 +2958,7 @@ def classify_intent(message):
         llm = ChatOpenAI(openai_api_key=openai_api_key)
         prompt = (
             "Classify the following message into one of these categories:\n"
-            "1: Greeting (hello, hi, good morning, good evening, こんにちは, こんばんは, おはよう, おやすみ, etc.)\n"
+            "1: Greeting (hello, hi, good morning, good evening, こんにちは, こんばんは, おはよう, おやすみ, おはよ, etc.)\n"
             "2: Thanks (thank you, thanks, ありがとう, どうも, etc.)\n"
             "3: Short reply (ok, yes, got it, わかった, うん, はい, 了解, etc.)\n"
             "4: Love advice (questions about love, dating, relationships, 恋愛, 相手, デート, 告白, etc.)\n"
@@ -2979,6 +2979,188 @@ def classify_intent(message):
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[classify_intent] error: {e}\n")
         return 6  # デフォルトは「その他」
+
+def classify_question_type(question):
+    """質問のタイプを詳細に分類"""
+    try:
+        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        prompt = (
+            "以下の質問を最も適切なカテゴリに分類してください：\n"
+            "1: 方法論・アプローチ (どうやって、どのように、方法、アプローチ、戦略)\n"
+            "2: 原因分析・理由説明 (なぜ、理由、原因、どうして)\n"
+            "3: タイミング・時期 (いつ、時期、タイミング、時期)\n"
+            "4: 場所・デートプラン (どこで、場所、デート、プラン)\n"
+            "5: 具体的な内容・アイデア (何を、内容、アイデア、提案)\n"
+            "6: 感情・心理 (気持ち、感情、心理、不安)\n"
+            "7: LINE・メッセージ (LINE、メッセージ、文例、返信)\n"
+            "8: 関係性・告白 (関係、告白、距離、親密度)\n"
+            "9: 一般的な相談 (全般、総合、アドバイス)\n"
+            "数字のみで回答してください。"
+        )
+        
+        response = llm.invoke(f"{prompt}\n\n質問: {question}")
+        result = int(response.content.strip())
+        
+        # デバッグログを追加
+        with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[classify_question_type] question: {question}, response: {response.content}, result: {result}\n")
+        
+        return result
+    except Exception as e:
+        with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[classify_question_type] error: {e}\n")
+        return 9  # デフォルトは「一般的な相談」
+
+def analyze_chat_history(history, user_profile):
+    """チャット履歴を分析して洞察を提供"""
+    try:
+        if not history:
+            return "初回の相談のため、過去の相談内容はありません。"
+        
+        # 履歴から主要なテーマを抽出
+        themes = []
+        if any("LINE" in msg or "メッセージ" in msg for msg in history):
+            themes.append("LINE・メッセージ")
+        if any("デート" in msg for msg in history):
+            themes.append("デート・お出かけ")
+        if any("告白" in msg for msg in history):
+            themes.append("告白・関係性")
+        if any("気持ち" in msg or "感情" in msg for msg in history):
+            themes.append("感情・心理")
+        if any("方法" in msg or "どうやって" in msg for msg in history):
+            themes.append("方法論・アプローチ")
+        if any("タイミング" in msg or "時期" in msg for msg in history):
+            themes.append("タイミング・時期")
+        if any("場所" in msg or "どこ" in msg for msg in history):
+            themes.append("場所・デートプラン")
+        if any("内容" in msg or "アイデア" in msg for msg in history):
+            themes.append("具体的な内容・アイデア")
+        if any("原因" in msg or "なぜ" in msg for msg in history):
+            themes.append("原因分析・理由説明")
+        
+        # ユーザーの傾向を分析
+        user_mbti = user_profile.get('mbti', '不明')
+        personality = MBTI_PERSONALITY.get(user_mbti, {})
+        
+        # 相談の頻度と傾向を分析
+        recent_count = len(history[-3:]) if len(history) >= 3 else len(history)
+        is_frequent = recent_count >= 2
+        
+        # 感情的な傾向を分析
+        emotional_keywords = ["不安", "心配", "悩み", "困る", "どうしよう", "怖い", "緊張"]
+        is_emotional = any(keyword in msg for msg in history for keyword in emotional_keywords)
+        
+        # 実践的な傾向を分析
+        practical_keywords = ["方法", "どうやって", "具体的", "実践", "ステップ"]
+        is_practical = any(keyword in msg for msg in history for keyword in practical_keywords)
+        
+        # 成長傾向を分析
+        growth_keywords = ["成長", "改善", "向上", "学ぶ", "経験"]
+        is_growth_oriented = any(keyword in msg for msg in history for keyword in growth_keywords)
+        
+        analysis = f"""過去の相談内容から以下の傾向が見られます：
+
+【相談テーマ】
+• 主な相談テーマ: {', '.join(themes) if themes else '様々なテーマ'}
+• 相談頻度: {'頻繁' if is_frequent else '適度'}
+• 感情的な傾向: {'感情的な相談が多い' if is_emotional else '実践的な相談が多い'}
+• 実践的な傾向: {'実践的な相談が多い' if is_practical else '理論的な相談が多い'}
+• 成長志向: {'成長志向が強い' if is_growth_oriented else '現状維持志向'}
+
+【あなたの特徴】
+• 性格特徴: {', '.join(personality.get('traits', [])[:3])}
+• よくある悩み: {', '.join(personality.get('common_concerns', [])[:2])}
+• 恋愛スタイル: {personality.get('love_style', '個性的')}
+• 強み: {', '.join(personality.get('strengths', [])[:2])}
+
+【アドバイス方針】
+• 過去の相談内容を踏まえて、より個性的で実践的なアドバイスを提供します
+• あなたの性格の強みを活かしたアプローチを心がけます
+• 継続的な改善と成長をサポートします
+• 感情的なサポートと実践的なアドバイスのバランスを取ります"""
+        
+        return analysis
+    except Exception as e:
+        return "過去の相談内容を分析中です。"
+
+def generate_compatibility_strategy(user_mbti, target_mbti, compatibility_notes):
+    """相性に基づくアプローチ戦略を生成"""
+    try:
+        if user_mbti == '不明' or target_mbti == '不明':
+            return "相性情報が不足しているため、一般的なアプローチを提案します。"
+        
+        # 相性に基づく戦略を生成
+        if "とても相性が良い" in compatibility_notes:
+            strategy = """【共通点を活かしたアプローチ】
+• 共通点を活かした自然なアプローチが効果的です
+• 相手との共通の価値観や興味を話題にしましょう
+• 共通の趣味や関心事を中心としたデートプランを提案しましょう
+• ただし、刺激が少なくなる可能性もあるので、適度な変化も大切です
+• 相手の好みを理解し、共通点を活かしたデートプランを提案しましょう
+
+【注意点】
+• 共通点に依存しすぎないよう、個性も大切にしましょう
+• 新しい体験や挑戦も取り入れて、関係に刺激を与えましょう
+• 共通点を基盤としつつ、お互いの個性も尊重しましょう
+
+【具体的なアプローチ】
+• 共通の趣味や関心事を話題にした自然な会話を心がけましょう
+• 共通の価値観を活かしたデートプランを提案しましょう
+• お互いの個性を活かした新しい体験も取り入れましょう"""
+        elif "バランスの取れた相性" in compatibility_notes:
+            strategy = """【バランスを活かしたアプローチ】
+• 共通点と違いのバランスを活かしたアプローチが効果的です
+• 相手の特徴を理解し、適切なアプローチを心がけましょう
+• お互いの違いを尊重しながら、共通点を活かした関係を築きましょう
+• 相手の好みを考慮しつつ、自分の個性も活かしたアプローチを提案しましょう
+
+【戦略】
+• 共通点を基盤とし、違いを楽しむ関係を築きましょう
+• お互いの特徴を理解し、補完し合える関係を目指しましょう
+• バランスの取れたアプローチで、お互いの成長を促進しましょう
+
+【具体的なアプローチ】
+• 共通点を話題にしつつ、お互いの個性も活かした会話を心がけましょう
+• 相手の好みを考慮しつつ、自分の特徴も活かしたアプローチを提案しましょう
+• お互いの違いを理解し、補完し合える関係を築きましょう"""
+        elif "補完し合える相性" in compatibility_notes:
+            strategy = """【違いを活かしたアプローチ】
+• お互いの違いを活かしたアプローチが効果的です
+• 相手の視点を理解し、相手の特徴を活かしたアプローチを心がけましょう
+• 相手の好みと自分の特徴の違いを理解し、適切なバランスを取ったアプローチを提案しましょう
+• お互いの違いを楽しみながら、理解を深めることが大切です
+
+【戦略】
+• 相手の特徴を深く理解し、相手の好みに合わせたアプローチを心がけましょう
+• お互いの違いを刺激として、成長し合える関係を築きましょう
+• 相手の視点を理解し、相手の特徴を活かしたアプローチを心がけましょう
+
+【具体的なアプローチ】
+• 相手の特徴を深く理解し、相手の好みに合わせたアプローチを心がけましょう
+• お互いの違いを刺激として、成長し合える関係を築きましょう
+• 相手の視点を理解し、相手の特徴を活かしたアプローチを心がけましょう"""
+        else:  # 刺激的な相性
+            strategy = """【刺激的な相性を活かしたアプローチ】
+• 相手の特徴を深く理解したアプローチが特に重要です
+• 相手の視点を深く理解し、相手の好みに合わせたアプローチを心がけましょう
+• 相手の特徴を活かしたアプローチが特に重要です
+• お互いの違いを楽しみながら、理解を深めることが大切です
+
+【戦略】
+• 相手の特徴を深く理解し、相手の好みに合わせたアプローチを心がけましょう
+• お互いの違いを刺激として、成長し合える関係を築きましょう
+• 長期的には非常に充実した関係を築ける可能性があります
+• 相手の特徴を活かしたアプローチが特に重要です
+
+【具体的なアプローチ】
+• 相手の特徴を深く理解し、相手の好みに合わせたアプローチを心がけましょう
+• お互いの違いを刺激として、成長し合える関係を築きましょう
+• 相手の視点を深く理解し、相手の特徴を活かしたアプローチを心がけましょう
+• 長期的な視点で、お互いの成長を促進する関係を築きましょう"""
+        
+        return strategy
+    except Exception as e:
+        return "相性に基づく戦略を生成中です。"
 
 def handle_casual_chat(user_id, message, user_profile):
     """雑談処理"""
@@ -3019,11 +3201,41 @@ def process_ai_chat(user_id, message, user_profile):
             elif intent == 3:  # 短い返事
                 return "うん、また何かあったら教えてね！"
             elif intent == 4:  # 恋愛相談
-                return ask_ai_with_vector_db(user_id, message, user_profile)
+                # 質問タイプを分類
+                question_type_num = classify_question_type(message)
+                question_types = [
+                    "方法論・アプローチ",
+                    "原因分析・理由説明", 
+                    "タイミング・時期",
+                    "場所・デートプラン",
+                    "具体的な内容・アイデア",
+                    "感情・心理",
+                    "LINE・メッセージ",
+                    "関係性・告白",
+                    "一般的な相談"
+                ]
+                question_type = question_types[question_type_num - 1] if 1 <= question_type_num <= 9 else "一般的な相談"
+                
+                return ask_ai_with_vector_db(user_id, message, user_profile, question_type)
             elif intent == 5:  # 雑談
                 return handle_casual_chat(user_id, message, user_profile)
             else:  # その他（恋愛相談として処理）
-                return ask_ai_with_vector_db(user_id, message, user_profile)
+                # 質問タイプを分類
+                question_type_num = classify_question_type(message)
+                question_types = [
+                    "方法論・アプローチ",
+                    "原因分析・理由説明", 
+                    "タイミング・時期",
+                    "場所・デートプラン",
+                    "具体的な内容・アイデア",
+                    "感情・心理",
+                    "LINE・メッセージ",
+                    "関係性・告白",
+                    "一般的な相談"
+                ]
+                question_type = question_types[question_type_num - 1] if 1 <= question_type_num <= 9 else "一般的な相談"
+                
+                return ask_ai_with_vector_db(user_id, message, user_profile, question_type)
         
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write("[process_ai_chat] is_paid False or not found\n")
@@ -3399,7 +3611,7 @@ def upload_db():
         return jsonify({"error": f"アップロードエラー: {str(e)}"}), 500
 
 # --- AI応答ロジックを関数化 ---
-def ask_ai_with_vector_db(user_id, question, user_profile):
+def ask_ai_with_vector_db(user_id, question, user_profile, question_type="一般的な相談"):
     os.makedirs("/data/logs", exist_ok=True)
     with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
         f.write(f"[ask_ai_with_vector_db] user_id={user_id}, question={question}, user_profile={user_profile}\n")
@@ -3416,7 +3628,7 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
         llm = ChatOpenAI(openai_api_key=openai_api_key)
         
         # パーソナライズされたアドバイスコンテキストを生成
-        personality_context = generate_personalized_advice(user_profile, question, history)
+        personality_context = generate_personalized_advice(user_profile, question, history, question_type)
         
         # より詳細で構造化されたプロンプトを構築
         prompt = f"""
@@ -3425,17 +3637,26 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
 【チャット履歴】
 {chr(10).join(history) if history else "初回の相談です"}
 
+【履歴分析】
+{analyze_chat_history(history, user_profile) if history else "初回の相談のため、過去の相談内容はありません。"}
+
 【ユーザーの質問】
 {question}
 
-【回答の指示】
-• ユーザーのMBTIの特徴を活かした具体的で実践的なアドバイスを提供してください
-• 相手のMBTIとの相性も考慮してください
-• 箇条書き、ステップ形式、物語形式など、適切な構造化を使用してください
-• 親しみやすくタメ口で絵文字も多めに使ってください
-• 同じ内容の繰り返しを避け、多様で魅力的な表現を使用してください
-• 具体的な例やシチュエーションも含めてください
-• ユーザーの強みを活かし、課題を克服する方法を提案してください
+【回答の品質向上のための指示】
+1. **具体的で実践的**: 抽象的なアドバイスではなく、すぐに実行できる具体的なステップを提供してください
+2. **個性を活かす**: あなたの性格の強みを活かし、相手の好みに合わせたアプローチを提案してください
+3. **段階的アプローチ**: 一気に進めるのではなく、段階的に関係を深める方法を教えてください
+4. **感情に寄り添う**: 相手の気持ちを理解し、共感を示しながらアドバイスしてください
+5. **現実的**: 理想論ではなく、現実的に実行可能なアドバイスを提供してください
+6. **多角的視点**: 一つの方法だけでなく、複数のアプローチ方法を提案してください
+7. **タイミング**: 適切なタイミングや時期についても言及してください
+8. **リスク管理**: 失敗した場合の対処法も含めてアドバイスしてください
+9. **絶対にMBTI名を回答に含めない**: ENTJ、INFPなどのMBTI名は使用しないでください
+10. **親しみやすい表現**: 「あなた」「君」と呼びかけ、タメ口で絵文字を適度に使用してください
+11. **構造化**: 改行を効果的に使用して読みやすく構造化してください
+12. **具体例**: 実際のLINEの例文やシナリオを具体的に示してください
+13. **自然な会話**: 友達がアドバイスしているような自然な会話の流れを心がけてください
 
 【重要】絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください。
 """
@@ -3455,7 +3676,7 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
         return "AI応答中にエラーが発生しました。"
 
 # MBTI別のパーソナライズされたアドバイス生成関数
-def generate_personalized_advice(user_profile, question, history):
+def generate_personalized_advice(user_profile, question, history, question_type="一般的な相談"):
     """MBTI別の性格特徴を活用したパーソナライズされたアドバイスを生成"""
     import random
     
@@ -3469,31 +3690,48 @@ def generate_personalized_advice(user_profile, question, history):
     user_nickname = MBTI_NICKNAME.get(user_mbti, "恋愛探検家")
     target_nickname = MBTI_NICKNAME.get(target_mbti, "恋愛相手")
     
-    # レスポンススタイルを決定（箇条書き、物語形式、対話形式など）
+    # レスポンススタイルを決定（より多様で魅力的な形式）
     response_styles = [
-        "bullet_points",  # 箇条書き
-        "story_format",   # 物語形式
-        "dialogue_format", # 対話形式
-        "step_by_step",   # ステップ形式
-        "comparison",     # 比較形式
-        "emotional",      # 感情重視
-        "tips_format",    # ティップス形式
-        "qa_format"       # Q&A形式
+        "bullet_points",      # 箇条書き
+        "story_format",       # 物語形式
+        "dialogue_format",    # 対話形式
+        "step_by_step",       # ステップ形式
+        "comparison",         # 比較形式
+        "emotional",          # 感情重視
+        "tips_format",        # ティップス形式
+        "qa_format",          # Q&A形式
+        "scenario_format",    # シナリオ形式
+        "checklist_format",   # チェックリスト形式
+        "timeline_format",    # タイムライン形式
+        "pros_cons_format",   # メリット・デメリット形式
+        "case_study_format",  # ケーススタディ形式
+        "mindmap_format",     # マインドマップ形式
+        "action_plan_format"  # アクションプラン形式
     ]
     
-    # ユーザーのMBTIに基づいてレスポンススタイルを選択
-    if user_mbti in ["INTJ", "INTP", "ENTJ", "ESTJ"]:
-        preferred_styles = ["bullet_points", "step_by_step", "comparison", "tips_format"]
-    elif user_mbti in ["INFJ", "INFP", "ENFJ", "ENFP"]:
-        preferred_styles = ["story_format", "emotional", "dialogue_format", "qa_format"]
-    elif user_mbti in ["ISTJ", "ISFJ", "ESFJ"]:
-        preferred_styles = ["step_by_step", "bullet_points", "comparison", "tips_format"]
-    else:
-        preferred_styles = ["dialogue_format", "story_format", "emotional", "qa_format"]
+    # ユーザーのMBTIに基づいてレスポンススタイルを選択（より詳細で個性的）
+    if user_mbti in ["INTJ", "INTP"]:  # 分析的な思考者
+        preferred_styles = ["bullet_points", "step_by_step", "comparison", "pros_cons_format", "case_study_format"]
+    elif user_mbti in ["ENTJ", "ESTJ"]:  # 決断力のあるリーダー
+        preferred_styles = ["action_plan_format", "checklist_format", "step_by_step", "bullet_points", "timeline_format"]
+    elif user_mbti in ["INFJ", "INFP"]:  # 理想主義者
+        preferred_styles = ["story_format", "emotional", "scenario_format", "mindmap_format", "dialogue_format"]
+    elif user_mbti in ["ENFJ", "ENFP"]:  # 社交的な理想主義者
+        preferred_styles = ["dialogue_format", "story_format", "emotional", "scenario_format", "qa_format"]
+    elif user_mbti in ["ISTJ", "ISFJ"]:  # 実務的な保守主義者
+        preferred_styles = ["checklist_format", "step_by_step", "bullet_points", "timeline_format", "tips_format"]
+    elif user_mbti in ["ESFJ"]:  # 社交的な実務家
+        preferred_styles = ["dialogue_format", "tips_format", "checklist_format", "story_format", "qa_format"]
+    elif user_mbti in ["ISTP", "ISFP"]:  # 実践的な冒険者
+        preferred_styles = ["action_plan_format", "scenario_format", "step_by_step", "tips_format", "bullet_points"]
+    elif user_mbti in ["ESTP", "ESFP"]:  # 社交的な冒険者
+        preferred_styles = ["scenario_format", "dialogue_format", "action_plan_format", "story_format", "tips_format"]
+    else:  # デフォルト
+        preferred_styles = ["dialogue_format", "story_format", "emotional", "qa_format", "tips_format"]
     
     style = random.choice(preferred_styles)
     
-    # 相性分析（簡単な相性判定）
+    # 詳細な相性分析
     compatibility_notes = ""
     if user_mbti != '不明' and target_mbti != '不明':
         # 同じ機能（E/I, S/N, T/F, J/P）の組み合わせで相性を判定
@@ -3501,14 +3739,33 @@ def generate_personalized_advice(user_profile, question, history):
         target_functions = [target_mbti[0], target_mbti[1], target_mbti[2], target_mbti[3]]
         
         matching_count = sum(1 for u, t in zip(user_functions, target_functions) if u == t)
+        
+        # より詳細な相性分析
         if matching_count >= 3:
-            compatibility_notes = "✨ とても相性が良い組み合わせです！共通点を活かしたアプローチが効果的です。"
+            compatibility_notes = f"""✨ とても相性が良い組み合わせです！
+• 共通点が多いため、自然に理解し合える関係を築けます
+• あなたの強みと相手の好みが合致している可能性が高いです
+• 共通の価値観を活かしたアプローチが効果的です
+• ただし、刺激が少なくなる可能性もあるので、適度な変化も大切です"""
         elif matching_count == 2:
-            compatibility_notes = "😊 バランスの取れた相性です。お互いの違いを理解し合うことが大切です。"
+            compatibility_notes = f"""😊 バランスの取れた相性です！
+• 共通点と違いのバランスが良く、お互いを成長させ合えます
+• あなたの特徴と相手の好みが部分的に合致しています
+• 相手の特徴を理解し、適切なアプローチを心がけることが大切です
+• お互いの違いを尊重しながら、共通点を活かした関係を築けます"""
         elif matching_count == 1:
-            compatibility_notes = "🤝 補完し合える相性です。相手の特徴を活かしたアプローチが効果的です。"
+            compatibility_notes = f"""🤝 補完し合える相性です！
+• お互いの違いが刺激となり、成長し合える関係です
+• あなたの特徴と相手の好みが異なるため、相手の視点を理解することが重要です
+• 相手の特徴を活かしたアプローチが効果的です
+• お互いの違いを楽しみながら、理解を深めることが大切です"""
         else:
-            compatibility_notes = "💫 刺激的な相性です！お互いの違いを楽しみながら、理解を深めることが大切です。"
+            compatibility_notes = f"""💫 刺激的な相性です！
+• お互いの違いが大きな刺激となり、新しい発見がたくさんあります
+• あなたの特徴と相手の好みが大きく異なるため、相手の視点を深く理解する必要があります
+• 相手の特徴を活かしたアプローチが特に重要です
+• お互いの違いを楽しみながら、理解を深めることが大切です
+• 長期的には非常に充実した関係を築ける可能性があります"""
     
     # パーソナライズされたプロンプトを構築
     personality_context = f"""
@@ -3564,24 +3821,72 @@ def generate_personalized_advice(user_profile, question, history):
 • 嫌いなNG行動: {', '.join(target_personality.get('disliked_ng_behaviors', []))}
 • 嫌いな人の特徴: {', '.join(target_personality.get('disliked_people_characteristics', []))}
 
+【参考情報】
+• あなたのLINE例: {random.choice(user_personality.get('line_examples', ['自然な会話を心がけてね']))}
+• 相手への告白例: {random.choice(target_personality.get('confession_examples', ['相手の気持ちを大切にしてね']))}
+• デート誘い例: {random.choice(target_personality.get('date_invitations', ['相手の好みを考えてね']))}
+• 相手のLINE例: {random.choice(target_personality.get('line_examples', ['相手の好みを理解してね']))}
+• 相手の好みのデート: {random.choice(target_personality.get('favorite_dates', ['相手の好みを考慮してね']))}
+• 相手への効果的なアプローチ: {random.choice(target_personality.get('partner_approaches', ['相手の特徴を理解してね']))}
+• 相手へのNGアプローチ: {random.choice(target_personality.get('partner_ng_behaviors', ['避けるべき行動を理解してね']))}
+• 相手の脈ありサイン: {random.choice(target_personality.get('romantic_signs', ['相手の気持ちを察してね']))}
+• 相手の告白タイミング: {target_personality.get('confession_timing', '相手の気持ちを考慮してね')}
+• 相手の告白ポイント: {random.choice(target_personality.get('key_points_for_confession', ['相手の気持ちを大切にしてね']))}
+• 相手の告白NGポイント: {random.choice(target_personality.get('ng_points_for_confession', ['避けるべきポイントを理解してね']))}
+• 相手の嫌いなNG行動: {random.choice(target_personality.get('disliked_ng_behaviors', ['避けるべき行動を理解してね']))}
+• 相手の会話例: {random.choice(target_personality.get('conversation_examples', ['相手の好みを理解してね']))}
+• 相手のLINEメッセージテンプレート: {random.choice(target_personality.get('line_message_templates', ['相手の好みを理解してね']))}
+• 相手の好みのデートプラン: {random.choice(target_personality.get('preferred_date_plans', ['相手の好みを考慮してね']))}
 
 【相性分析】
 {compatibility_notes}
 
+【相性に基づくアプローチ戦略】
+{generate_compatibility_strategy(user_mbti, target_mbti, compatibility_notes)}
+
+【質問タイプ】
+{question_type}
+
+【質問タイプ別イントロ】
+{get_random_response_pattern("advice_intro", user_profile, question_type)}
+
 【レスポンススタイル】
 {style}で回答してください。
 
-【重要指示】
-1. 絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください
-2. 「ユーザー」ではなく「あなた」「君」など親しみやすい呼び方を使ってください
-3. 親しみやすくタメ口で絵文字も多めに使ってください
-4. 改行を効果的に使って、読みやすく構造化してください
-5. 難しい言葉は避けて、簡単で分かりやすい表現を使ってください
-6. 実際のLINEの例文を具体的に示してください（例：「お疲れさま〜！今日はどんな一日だった？」）
-7. 自分のMBTIと相手のMBTIの特徴を考慮して、相手に響くアプローチ方法を提案してください
-8. 相手の気持ちに寄り添い、共感を示しながらアドバイスしてください
-9. 具体的で実践できるアドバイスを提供してください
-10. 友達がアドバイスしているような自然な会話の流れを心がけてください
+【回答品質向上のための指示】
+1. **具体的で実践的**: 抽象的なアドバイスではなく、すぐに実行できる具体的なステップを提供してください
+2. **個性を活かす**: あなたの性格の強みを活かし、相手の好みに合わせたアプローチを提案してください
+3. **段階的アプローチ**: 一気に進めるのではなく、段階的に関係を深める方法を教えてください
+4. **感情に寄り添う**: 相手の気持ちを理解し、共感を示しながらアドバイスしてください
+5. **現実的**: 理想論ではなく、現実的に実行可能なアドバイスを提供してください
+6. **多角的視点**: 一つの方法だけでなく、複数のアプローチ方法を提案してください
+7. **タイミング**: 適切なタイミングや時期についても言及してください
+8. **リスク管理**: 失敗した場合の対処法も含めてアドバイスしてください
+9. **絶対にMBTI名を回答に含めない**: ENTJ、INFPなどのMBTI名は使用しないでください
+10. **親しみやすい表現**: 「あなた」「君」と呼びかけ、タメ口で絵文字を適度に使用してください
+11. **構造化**: 改行を効果的に使用して読みやすく構造化してください
+12. **具体例**: 実際のLINEの例文やシナリオを具体的に示してください
+13. **自然な会話**: 友達がアドバイスしているような自然な会話の流れを心がけてください
+14. **個性的な表現**: 毎回異なる視点やアプローチを提供してください
+15. **相手の立場**: 相手の気持ちや立場を深く理解したアドバイスを提供してください
+16. **長期的視点**: 短期的な解決策だけでなく、長期的な関係構築も考慮してください
+17. **バランス**: 理想と現実のバランスを取ったアドバイスを提供してください
+18. **継続性**: 継続的に実践できるアドバイスを提供してください
+19. **成長視点**: お互いの成長を促進するアドバイスを提供してください
+20. **コミュニケーション**: 効果的なコミュニケーション方法を提案してください
+21. **信頼関係**: 信頼関係を築くためのアドバイスを提供してください
+22. **自己肯定感**: 自己肯定感を高めるアドバイスも含めてください
+
+【質問タイプ別の詳細指示】
+• 方法論・アプローチ: 具体的なステップ、タイミング、注意点を含めて段階的に説明してください。実践可能なアクションプランを提供してください。各ステップの理由と効果も説明してください。複数のアプローチ方法も提示してください。
+• 原因分析・理由説明: 心理的背景、相手の立場、解決策を含めて深く分析してください。なぜそのような状況になったのか、どうすれば改善できるかを詳しく説明してください。相手の視点からも分析してください。根本的な原因と表面的な原因を区別してください。
+• タイミング・時期: 最適な時期、その理由、準備方法を含めて詳しく説明してください。なぜそのタイミングが良いのか、どのように準備すべきかを具体的に提案してください。複数のタイミングオプションも提示してください。季節やイベントも考慮してください。
+• 場所・デートプラン: 具体的な場所、予算、時間、代替案を含めて提案してください。相手の好みを考慮した場所選びと、予算内で楽しめるプランを提供してください。天候や季節も考慮してください。複数の場所の選択肢を提示してください。
+• 具体的な内容・アイデア: 実践可能なアイデア、準備物、実行手順を含めて提案してください。すぐに実行できる具体的なアイデアと、必要な準備を詳しく説明してください。複数の選択肢を提示してください。予算や時間の制約も考慮してください。
+• 感情・心理: 相手の気持ち、自分の気持ち、対処法を含めてサポートしてください。感情的な側面に寄り添い、心理的なサポートを提供してください。感情の変化や成長についても言及してください。自己肯定感を高めるアドバイスも含めてください。
+• LINE・メッセージ: 具体的な文例、送信タイミング、返信パターンを含めて提案してください。相手の性格に合わせたメッセージ例と、適切なタイミングを具体的に提案してください。返信が来ない場合の対処法も含めてください。複数の文例パターンを提示してください。
+• 関係性・告白: 段階的なアプローチ、リスク管理、失敗時の対処法を含めてアドバイスしてください。関係を深める段階的な方法と、告白のタイミング、失敗した場合の対処法を詳しく説明してください。長期的な関係構築も考慮してください。信頼関係の構築も含めてください。
+• 一般的な相談: 総合的な視点、複数の選択肢、長期的な視点を含めてアドバイスしてください。様々な角度から分析し、複数の選択肢と長期的な視点を提供してください。継続的な改善方法も提案してください。成長と学習の視点も含めてください。
 """
     
     return personality_context
@@ -3593,45 +3898,113 @@ RESPONSE_PATTERNS = {
         "やっほー！何か恋愛の悩みでもある？💕",
         "お疲れさま！恋愛について話したいことがあればいつでも聞くよ〜✨",
         "こんばんは！今日はどんな恋愛の相談があるの？🌟",
-        "はーい！恋愛について何でも聞いてね〜😄"
+        "はーい！恋愛について何でも聞いてね〜😄",
+        "こんにちは〜！恋愛の相談、待ってるよ〜💖",
+        "やっほー！今日も恋愛について話そう〜😊",
+        "お疲れさま〜！恋愛の悩み、一緒に解決していこう〜✨"
     ],
     "thanks": [
         "どういたしまして！あなたの恋愛がうまくいくことを願ってるよ〜💖",
         "いえいえ！あなたが幸せになれるように全力でサポートするからね〜✨",
         "ありがとう！あなたの恋愛相談、いつでも聞くよ〜😊",
         "うれしい！あなたの恋愛がうまくいくといいね〜🌟",
-        "こちらこそ！あなたの恋愛を応援してるよ〜💕"
+        "こちらこそ！あなたの恋愛を応援してるよ〜💕",
+        "どういたしまして〜！また何でも聞いてね〜😄",
+        "いえいえ〜！あなたの恋愛、応援してるよ〜💪",
+        "ありがとう〜！一緒に恋愛を楽しもう〜✨"
     ],
     "casual": [
         "そうなんだ〜！あなたの恋愛についてもっと詳しく教えて〜😊",
         "なるほど！あなたの恋愛観、とても興味深いね〜✨",
         "へー！恋愛についてこんな風に考えてるんだ〜💕",
         "面白い！あなたの恋愛の話、もっと聞きたいな〜🌟",
-        "そうなんだ！恋愛について色々考えてるんだね〜😄"
+        "そうなんだ！恋愛について色々考えてるんだね〜😄",
+        "へー！恋愛についてこんな風に感じてるんだ〜💖",
+        "なるほど〜！あなたの恋愛観、とても素敵だね〜😊",
+        "面白い！恋愛について色々考えてるんだね〜✨"
     ],
     "encouragement": [
         "大丈夫！あなたなら絶対にうまくいくよ〜💪✨",
         "頑張って！あなたの恋愛、応援してるよ〜💖",
         "きっと大丈夫！あなたの魅力、相手にも伝わるはず〜😊",
-        "諦めないで！{あなたの恋愛、必ず良い方向に進むよ〜🌟",
-        "信じてる！あなたの恋愛、きっと素敵なものになるよ〜💕"
+        "諦めないで！あなたの恋愛、必ず良い方向に進むよ〜🌟",
+        "信じてる！あなたの恋愛、きっと素敵なものになるよ〜💕",
+        "大丈夫！あなたの魅力、きっと伝わるよ〜😄",
+        "頑張って！あなたなら絶対にできるよ〜💪",
+        "きっと大丈夫！あなたの恋愛、応援してるよ〜✨"
     ],
     "advice_intro": [
         "よし！あなたの恋愛について、一緒に考えてみよう〜✨",
         "なるほど！あなたの恋愛の悩み、解決策を考えてみるね〜😊",
         "わかった！あなたの恋愛について、具体的なアドバイスをしてみるよ〜💕",
         "そうなんだ！あなたの恋愛について、一緒に考えてみよう〜🌟",
-        "了解！あなたの恋愛について、詳しくアドバイスしてみるね〜😄"
-    ]
+        "了解！あなたの恋愛について、詳しくアドバイスしてみるね〜😄",
+        "よし！あなたの恋愛、一緒に解決していこう〜💖",
+        "なるほど！あなたの恋愛について、詳しくアドバイスしてみるね〜😊",
+        "わかった！あなたの恋愛、一緒に考えてみよう〜✨"
+    ],
+    "question_type_specific": {
+        "方法論・アプローチ": [
+            "よし！具体的な方法を一緒に考えてみよう〜💪",
+            "なるほど！段階的なアプローチを提案してみるね〜✨",
+            "わかった！実践的な方法を詳しく説明するよ〜😊"
+        ],
+        "原因分析・理由説明": [
+            "そうなんだ！なぜそうなったのか、一緒に分析してみよう〜🤔",
+            "なるほど！原因を深く考えてみるね〜💭",
+            "わかった！背景を詳しく分析してみるよ〜✨"
+        ],
+        "タイミング・時期": [
+            "そうなんだ！最適なタイミングを一緒に考えてみよう〜⏰",
+            "なるほど！時期について詳しくアドバイスしてみるね〜📅",
+            "わかった！タイミングのポイントを説明するよ〜✨"
+        ],
+        "場所・デートプラン": [
+            "よし！素敵な場所やプランを一緒に考えてみよう〜🗺️",
+            "なるほど！相手の好みに合わせた場所を提案してみるね〜💕",
+            "わかった！具体的なデートプランを考えてみるよ〜✨"
+        ],
+        "具体的な内容・アイデア": [
+            "よし！具体的なアイデアを一緒に考えてみよう〜💡",
+            "なるほど！実践できるアイデアを提案してみるね〜✨",
+            "わかった！すぐに実行できる内容を考えてみるよ〜😊"
+        ],
+        "感情・心理": [
+            "そうなんだ！気持ちの面を一緒に考えてみよう〜💖",
+            "なるほど！心理的な側面からサポートしてみるね〜🧠",
+            "わかった！感情に寄り添ったアドバイスをしてみるよ〜✨"
+        ],
+        "LINE・メッセージ": [
+            "よし！LINEの文例を一緒に考えてみよう〜📱",
+            "なるほど！相手に響くメッセージを提案してみるね〜💬",
+            "わかった！具体的な文例を考えてみるよ〜✨"
+        ],
+        "関係性・告白": [
+            "そうなんだ！関係性について一緒に考えてみよう〜💕",
+            "なるほど！告白について詳しくアドバイスしてみるね〜💖",
+            "わかった！段階的なアプローチを考えてみるよ〜✨"
+        ],
+        "一般的な相談": [
+            "よし！恋愛について一緒に考えてみよう〜💕",
+            "なるほど！総合的なアドバイスをしてみるね〜✨",
+            "わかった！様々な角度から考えてみるよ〜😊"
+        ]
+    }
 }
 
 # ランダムなレスポンスパターンを取得する関数
-def get_random_response_pattern(pattern_type, user_profile):
+def get_random_response_pattern(pattern_type, user_profile, question_type=None):
     """指定されたタイプのランダムなレスポンスパターンを取得"""
     import random
     
     user_mbti = user_profile.get('mbti', '不明')
     nickname = MBTI_NICKNAME.get(user_mbti, "恋愛探検家")
+    
+    # 質問タイプ別のパターンがある場合は優先使用
+    if question_type and pattern_type == "advice_intro":
+        question_type_patterns = RESPONSE_PATTERNS.get("question_type_specific", {}).get(question_type, [])
+        if question_type_patterns:
+            return random.choice(question_type_patterns).format(nickname=nickname)
     
     patterns = RESPONSE_PATTERNS.get(pattern_type, [])
     if patterns:
