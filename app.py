@@ -3529,6 +3529,7 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
         
         # ChatGPT APIを使用してレスポンス生成
         try:
+            print(f"OpenAI API呼び出し開始: {question}")
             response = openai.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
@@ -3539,14 +3540,21 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
                 temperature=0.7
             )
             answer = response.choices[0].message.content
+            print(f"OpenAI API回答取得成功: {answer[:100]}...")
             
             # 回答が正常に生成されたかチェック
             if not answer or len(answer.strip()) < 10:
+                print("回答が短すぎるため、フォールバックを使用")
                 raise Exception("回答が短すぎるか空です")
+            
+            # ChatGPTの回答が正常に生成された場合、そのまま使用
+            print("ChatGPTの回答を使用します")
+            return answer
                 
         except Exception as e:
             # APIエラー時のフォールバック - より自然な応答
-            print(f"OpenAI API エラー: {e}")
+            print(f"OpenAI API エラーまたは回答不適切: {e}")
+            print("フォールバック応答を使用します")
             
             user_mbti = user_profile.get('mbti', '不明')
             target_mbti = user_profile.get('target_mbti', '不明')
@@ -3582,9 +3590,10 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
                     return f"【{question}】について、あなたの性格を活かしたアドバイスをするね！\n\n相手の好みも理解しながら、二人の相性に合ったアプローチを心がけてみてね✨"
             
             answer = get_natural_fallback_response(question_type, question, user_mbti, target_mbti)
+            print("フォールバック応答を使用しました")
         
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[ask_ai_with_vector_db] ChatGPT answer: {answer}\n")
+            f.write(f"[ask_ai_with_vector_db] Final answer: {answer}\n")
         save_message(user_id, "user", question)
         save_message(user_id, "bot", answer)
         return answer
