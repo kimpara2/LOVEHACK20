@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify
-import openai
+from langchain.vectorstores import Chroma
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.chat_models import ChatOpenAI
+from langchain.chains import RetrievalQA
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -64,7 +67,6 @@ def send_chat_message_to_gas(user_id, mbti):
 
 # 🔐 OpenAI・Stripe・LINE設定
 openai_api_key = os.getenv("OPENAI_API_KEY")
-openai.api_key = openai_api_key  # OpenAI APIキーを設定
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 stripe_price_id = os.getenv("STRIPE_PRICE_ID")
 stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
@@ -2953,95 +2955,47 @@ def send_line_reply(reply_token, message):
 def classify_intent(message):
     """メッセージの意図を分類"""
     try:
-        # ChatGPT APIを使用して意図分類
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Classify the following message into one of these categories:\n1: Greeting (hello, hi, good morning, good evening, こんにちは, こんばんは, おはよう, おやすみ, etc.)\n2: Thanks (thank you, thanks, ありがとう, どうも, etc.)\n3: Short reply (ok, yes, got it, わかった, うん, はい, 了解, etc.)\n4: Love advice (questions about love, dating, relationships, 恋愛, 相手, デート, 告白, etc.)\n5: Casual chat (weather, hobbies, daily conversation, 天気, 趣味, 日常会話, etc.)\n6: Other\nReturn only the number (1-6)."},
-                {"role": "user", "content": message}
-            ],
-            max_tokens=10,
-            temperature=0.1
+        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        prompt = (
+            "Classify the following message into one of these categories:\n"
+            "1: Greeting (hello, hi, good morning, good evening, こんにちは, こんばんは, おはよう, おやすみ, etc.)\n"
+            "2: Thanks (thank you, thanks, ありがとう, どうも, etc.)\n"
+            "3: Short reply (ok, yes, got it, わかった, うん, はい, 了解, etc.)\n"
+            "4: Love advice (questions about love, dating, relationships, 恋愛, 相手, デート, 告白, etc.)\n"
+            "5: Casual chat (weather, hobbies, daily conversation, 天気, 趣味, 日常会話, etc.)\n"
+            "6: Other\n"
+            "Return only the number (1-6)."
         )
-        result = int(response.choices[0].message.content.strip())
+        
+        response = llm.invoke(f"{prompt}\n\nMessage: {message}")
+        result = int(response.content.strip())
         
         # デバッグログを追加
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[classify_intent] message: {message}, response: {response.choices[0].message.content}, result: {result}\n")
+            f.write(f"[classify_intent] message: {message}, response: {response.content}, result: {result}\n")
         
         return result
     except Exception as e:
-        # エラー時はキーワードベースの分類にフォールバック
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[classify_intent] error: {e}\n")
-        message_lower = message.lower()
-        if any(word in message_lower for word in ['こんにちは', 'こんばんは', 'おはよう', 'おはよ', 'おやすみ', 'hello', 'hi', 'good morning', 'good evening']):
-            return 1
-        elif any(word in message_lower for word in ['ありがとう', 'どうも', 'thank you', 'thanks']):
-            return 2
-        elif any(word in message_lower for word in ['わかった', 'うん', 'はい', '了解', 'ok', 'yes', 'got it']):
-            return 3
-        elif any(word in message_lower for word in ['恋愛', '相手', 'デート', '告白', 'love', 'dating', 'relationship']):
-            return 4
-        elif any(word in message_lower for word in ['天気', '趣味', '日常会話', 'weather', 'hobby', 'daily']):
-            return 5
-        else:
-            return 6
+        return 6  # デフォルトは「その他」
 
 def handle_casual_chat(user_id, message, user_profile):
     """雑談処理"""
     try:
-        # 雑談の種類を分析
-        chat_type = analyze_casual_chat_type(message)
-        
-        # ユーザーのMBTI情報を取得
-        user_mbti = user_profile.get('mbti', '不明')
-        user_nickname = MBTI_NICKNAME.get(user_mbti, "恋愛探検家")
-        
-        # ChatGPT APIを使用して雑談レスポンス生成
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": f"あなたは{user_nickname}の親友です。{chat_type}について自然に返してください。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。これは雑談です。恋愛アドバイスではなく、日常会話として返してください。"},
-                {"role": "user", "content": message}
-            ],
-            max_tokens=200,
-            temperature=0.8
+        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        prompt = (
+            f"あなたはMBTI診断ベースの女性の恋愛マスターの友達です。\n"
+            f"ユーザー情報: あなたのMBTI: {user_profile.get('mbti', '不明')}, あなたの性別: {user_profile.get('gender', '不明')}\n"
+            f"ユーザーの発言: {message}\n"
+            f"これは雑談です。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。\n"
+            f"恋愛アドバイスではなく、日常会話として返してください。"
         )
-        return response.choices[0].message.content
+        
+        response = llm.invoke(prompt)
+        return response.content
     except Exception as e:
-        # エラー時のフォールバックレスポンス
-        fallback_responses = [
-            "うん、そうだね！😊",
-            "なるほど〜！✨",
-            "へー、面白いね〜💕",
-            "そうなんだ！😄",
-            "わかる〜！🌟"
-        ]
-        import random
-        return random.choice(fallback_responses)
-
-def analyze_casual_chat_type(message):
-    """雑談の種類を分析"""
-    message_lower = message.lower()
-    
-    # 感情表現
-    if any(word in message_lower for word in ['疲れた', '大変', '辛い', '嬉しい', '楽しい', '悲しい', '怒った']):
-        return "感情共有"
-    # 趣味・興味
-    elif any(word in message_lower for word in ['映画', '音楽', 'ゲーム', 'スポーツ', '読書', '料理', '旅行']):
-        return "趣味話題"
-    # 天気・季節
-    elif any(word in message_lower for word in ['天気', '雨', '晴れ', '寒い', '暑い', '春', '夏', '秋', '冬']):
-        return "天気・季節"
-    # 仕事・学校
-    elif any(word in message_lower for word in ['仕事', '学校', '会社', '授業', 'テスト', '会議', '残業']):
-        return "仕事・学校"
-    # 日常会話
-    elif any(word in message_lower for word in ['今日', '昨日', '明日', '週末', '休み', 'ご飯', '寝る']):
-        return "日常会話"
-    else:
-        return "その他"
+        return "うん、そうだね！😊"
 
 # AIチャット処理関数
 def process_ai_chat(user_id, message, user_profile):
@@ -3059,35 +3013,11 @@ def process_ai_chat(user_id, message, user_profile):
                 f.write(f"[process_ai_chat] intent classified as: {intent}\n")
             
             if intent == 1:  # 挨拶
-                greeting_responses = [
-                    "こんばんは！今日も気軽に話してね😊",
-                    "やっほー！今日はどんな一日だった？✨",
-                    "お疲れさま〜！今日もお話ししましょう💕",
-                    "こんばんは！何か相談したいことある？🌟",
-                    "はーい！今日も一緒に恋愛について考えよう〜😄"
-                ]
-                import random
-                return random.choice(greeting_responses)
+                return "こんばんは！今日も気軽に話してね😊"
             elif intent == 2:  # 感謝
-                thanks_responses = [
-                    "どういたしまして！また何でも聞いてね✨",
-                    "いえいえ〜！あなたの恋愛がうまくいくことを願ってるよ💖",
-                    "ありがとう！また何かあったら気軽に相談してね😊",
-                    "うれしい！あなたの恋愛を応援してるよ〜🌟",
-                    "こちらこそ！あなたが幸せになれるようにサポートするからね💕"
-                ]
-                import random
-                return random.choice(thanks_responses)
+                return "どういたしまして！また何でも聞いてね✨"
             elif intent == 3:  # 短い返事
-                short_responses = [
-                    "うん、また何かあったら教えてね！",
-                    "了解〜！いつでも相談してね✨",
-                    "わかった！また何かあったら聞いてね💕",
-                    "OK！恋愛の悩みがあればいつでも〜😊",
-                    "うんうん！また何かあったら教えてね🌟"
-                ]
-                import random
-                return random.choice(short_responses)
+                return "うん、また何かあったら教えてね！"
             elif intent == 4:  # 恋愛相談
                 return ask_ai_with_vector_db(user_id, message, user_profile)
             elif intent == 5:  # 雑談
@@ -3097,42 +3027,18 @@ def process_ai_chat(user_id, message, user_profile):
         
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write("[process_ai_chat] is_paid False or not found\n")
-        if any(word in message.lower() for word in ["こんにちは", "こんばんは", "おはよう", "おはよ", "hello", "hi"]):
+        if "こんにちは" in message or "hello" in message.lower():
             with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
                 f.write("[process_ai_chat] greeting branch\n")
-            free_greeting_responses = [
-                "こんにちは！恋愛の相談があるときはいつでも聞いてね💕",
-                "やっほー！恋愛について何か悩みがあれば相談してね✨",
-                "お疲れさま〜！恋愛の相談があれば気軽に聞いてね😊",
-                "こんにちは！恋愛について何でも聞いてね🌟",
-                "はーい！恋愛の悩みがあればいつでも相談してね💖"
-            ]
-            import random
-            return random.choice(free_greeting_responses)
+            return "こんにちは！恋愛の相談があるときはいつでも聞いてね💕"
         elif "ありがとう" in message:
             with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
                 f.write("[process_ai_chat] thanks branch\n")
-            free_thanks_responses = [
-                "どういたしまして！他にも恋愛の悩みがあれば気軽に相談してね✨",
-                "いえいえ〜！あなたの恋愛がうまくいくことを願ってるよ💕",
-                "ありがとう！また何か恋愛の悩みがあれば聞いてね😊",
-                "うれしい！あなたの恋愛を応援してるよ〜🌟",
-                "こちらこそ！恋愛について何でも相談してね💖"
-            ]
-            import random
-            return random.choice(free_thanks_responses)
+            return "どういたしまして！他にも恋愛の悩みがあれば気軽に相談してね✨"
         else:
             with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
                 f.write("[process_ai_chat] default advice branch\n")
-            default_responses = [
-                f"【{user_profile.get('mbti', '不明')}タイプ】のあなたへのアドバイス：\n{message}について詳しく教えてくれると、もっと具体的なアドバイスができるよ！",
-                f"なるほど〜！{message}について詳しく教えてくれると、あなたのMBTIタイプに合ったアドバイスができるよ✨",
-                f"そうなんだ！{message}についてもっと詳しく聞かせてくれると、具体的なアドバイスをできるよ💕",
-                f"へー！{message}について詳しく教えてくれると、あなたに合ったアドバイスができるよ😊",
-                f"わかった！{message}について詳しく聞かせてくれると、より良いアドバイスができるよ🌟"
-            ]
-            import random
-            return random.choice(default_responses)
+            return f"【{user_profile.get('mbti', '不明')}タイプ】のあなたへのアドバイス：\n{message}について詳しく教えてくれると、もっと具体的なアドバイスができるよ！"
     except Exception as e:
         import traceback
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
@@ -3507,8 +3413,7 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
         return "有料会員のみ利用できます"
     history = get_recent_history(user_id)
     try:
-        # 質問タイプを分析
-        question_type = analyze_question_type(question)
+        llm = ChatOpenAI(openai_api_key=openai_api_key)
         
         # パーソナライズされたアドバイスコンテキストを生成
         personality_context = generate_personalized_advice(user_profile, question, history)
@@ -3523,77 +3428,21 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
 【ユーザーの質問】
 {question}
 
-【質問タイプ】
-{question_type}
+【回答の指示】
+• ユーザーのMBTIの特徴を活かした具体的で実践的なアドバイスを提供してください
+• 相手のMBTIとの相性も考慮してください
+• 箇条書き、ステップ形式、物語形式など、適切な構造化を使用してください
+• 親しみやすくタメ口で絵文字も多めに使ってください
+• 同じ内容の繰り返しを避け、多様で魅力的な表現を使用してください
+• 具体的な例やシチュエーションも含めてください
+• ユーザーの強みを活かし、課題を克服する方法を提案してください
+
+【重要】絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください。
 """
         
-        # ChatGPT APIを使用してレスポンス生成
-        try:
-            print(f"OpenAI API呼び出し開始: {question}")
-            response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": personality_context},
-                    {"role": "user", "content": f"【チャット履歴】\n{chr(10).join(history) if history else '初回の相談です'}\n\n【ユーザーの質問】\n{question}\n\n【質問タイプ】\n{question_type}"}
-                ],
-                max_tokens=1000,
-                temperature=0.7
-            )
-            answer = response.choices[0].message.content
-            print(f"OpenAI API回答取得成功: {answer[:100]}...")
-            
-            # 回答が正常に生成されたかチェック
-            if not answer or len(answer.strip()) < 10:
-                print("回答が短すぎるため、フォールバックを使用")
-                raise Exception("回答が短すぎるか空です")
-            
-            # ChatGPTの回答が正常に生成された場合、そのまま使用
-            print("ChatGPTの回答を使用します")
-            return answer
-                
-        except Exception as e:
-            # APIエラー時のフォールバック - より自然な応答
-            print(f"OpenAI API エラーまたは回答不適切: {e}")
-            print("フォールバック応答を使用します")
-            
-            user_mbti = user_profile.get('mbti', '不明')
-            target_mbti = user_profile.get('target_mbti', '不明')
-            user_personality = MBTI_PERSONALITY.get(user_mbti, {})
-            
-            # より自然なフォールバック応答を生成
-            def get_natural_fallback_response(question_type, question, user_mbti, target_mbti):
-                if question_type == "方法論・アプローチ":
-                    return f"【{question}】について、あなたの性格に合った方法を教えるね！\n\nあなたの強みを活かして、相手の好みも考慮したアプローチを心がけてみて。段階的に進めていくのがおすすめだよ✨"
-                
-                elif question_type == "LINE・メッセージ":
-                    line_examples = user_personality.get('line_examples', [])
-                    if line_examples:
-                        return f"【{question}】について、あなたらしいメッセージ例を提案するね！\n\n💬 こんな感じはどう？\n{random.choice(line_examples)}\n\n相手の性格も考えて、自然な感じで送ってみてね✨"
-                    else:
-                        return f"【{question}】について、あなたの性格に合ったメッセージを考えてみてね！\n\n相手が興味を持ちそうな話題から始めて、あなたらしい自然なメッセージが一番効果的だよ💕"
-                
-                elif question_type == "場所・デートプラン":
-                    favorite_dates = user_personality.get('favorite_dates', [])
-                    if favorite_dates:
-                        return f"【{question}】について、あなたの好みに合った場所を提案するね！\n\n🎯 こんな場所はどう？\n• {random.choice(favorite_dates)}\n\n相手の好みも考えながら、二人が楽しめる場所を選んでみてね✨"
-                    else:
-                        return f"【{question}】について、あなたと相手の好みを考えた場所を選んでみてね！\n\n相手が喜びそうな場所で、あなたも楽しめるのが一番だよ💕"
-                
-                elif question_type == "関係性・告白":
-                    confession_examples = user_personality.get('confession_examples', [])
-                    if confession_examples:
-                        return f"【{question}】について、あなたらしい告白方法を提案するね！\n\n💝 こんな感じはどう？\n{random.choice(confession_examples)}\n\n相手が安心できる環境で、あなたらしい方法で告白してみてね✨"
-                    else:
-                        return f"【{question}】について、あなたの性格に合った告白方法を考えてみてね！\n\n相手が安心できる環境で、あなたらしい方法で告白してみて💕"
-                
-                else:
-                    return f"【{question}】について、あなたの性格を活かしたアドバイスをするね！\n\n相手の好みも理解しながら、二人の相性に合ったアプローチを心がけてみてね✨"
-            
-            answer = get_natural_fallback_response(question_type, question, user_mbti, target_mbti)
-            print("フォールバック応答を使用しました")
-        
+        answer = llm.invoke(prompt).content
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[ask_ai_with_vector_db] Final answer: {answer}\n")
+            f.write(f"[ask_ai_with_vector_db] LLM only answer: {answer}\n")
         save_message(user_id, "user", question)
         save_message(user_id, "bot", answer)
         return answer
@@ -3604,30 +3453,6 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
             f.write(traceback.format_exc() + "\n")
         traceback.print_exc()
         return "AI応答中にエラーが発生しました。"
-
-def analyze_question_type(question):
-    """質問の種類を分析して、適切な回答スタイルを決定"""
-    question_lower = question.lower()
-    
-    # 質問タイプの判定
-    if any(word in question_lower for word in ['どう', 'どのように', '方法', 'やり方', 'アプローチ']):
-        return "方法論・アプローチ"
-    elif any(word in question_lower for word in ['なぜ', '理由', '原因', 'どうして']):
-        return "原因分析・理由説明"
-    elif any(word in question_lower for word in ['いつ', 'タイミング', '時期']):
-        return "タイミング・時期"
-    elif any(word in question_lower for word in ['どこ', '場所', 'デート']):
-        return "場所・デートプラン"
-    elif any(word in question_lower for word in ['何', '何を', '何が']):
-        return "具体的な内容・アイデア"
-    elif any(word in question_lower for word in ['気持ち', '感情', '感じ']):
-        return "感情・心理"
-    elif any(word in question_lower for word in ['line', 'メッセージ', '返信']):
-        return "LINE・メッセージ"
-    elif any(word in question_lower for word in ['告白', 'プロポーズ', '関係']):
-        return "関係性・告白"
-    else:
-        return "一般的な相談"
 
 # MBTI別のパーソナライズされたアドバイス生成関数
 def generate_personalized_advice(user_profile, question, history):
@@ -3644,35 +3469,29 @@ def generate_personalized_advice(user_profile, question, history):
     user_nickname = MBTI_NICKNAME.get(user_mbti, "恋愛探検家")
     target_nickname = MBTI_NICKNAME.get(target_mbti, "恋愛相手")
     
-    # 質問タイプに基づいてレスポンススタイルを決定
-    style_mapping = {
-        "方法論・アプローチ": ["step_by_step", "bullet_points", "tips_format"],
-        "原因分析・理由説明": ["comparison", "story_format", "qa_format"],
-        "タイミング・時期": ["bullet_points", "step_by_step", "tips_format"],
-        "場所・デートプラン": ["story_format", "dialogue_format", "tips_format"],
-        "具体的な内容・アイデア": ["bullet_points", "story_format", "tips_format"],
-        "感情・心理": ["emotional", "story_format", "dialogue_format"],
-        "LINE・メッセージ": ["dialogue_format", "tips_format", "bullet_points"],
-        "関係性・告白": ["emotional", "story_format", "step_by_step"],
-        "一般的な相談": ["dialogue_format", "story_format", "qa_format"]
-    }
+    # レスポンススタイルを決定（箇条書き、物語形式、対話形式など）
+    response_styles = [
+        "bullet_points",  # 箇条書き
+        "story_format",   # 物語形式
+        "dialogue_format", # 対話形式
+        "step_by_step",   # ステップ形式
+        "comparison",     # 比較形式
+        "emotional",      # 感情重視
+        "tips_format",    # ティップス形式
+        "qa_format"       # Q&A形式
+    ]
     
-    # 質問タイプを分析
-    question_type = analyze_question_type(question)
-    preferred_styles = style_mapping.get(question_type, ["dialogue_format", "story_format", "qa_format"])
+    # ユーザーのMBTIに基づいてレスポンススタイルを選択
+    if user_mbti in ["INTJ", "INTP", "ENTJ", "ESTJ"]:
+        preferred_styles = ["bullet_points", "step_by_step", "comparison", "tips_format"]
+    elif user_mbti in ["INFJ", "INFP", "ENFJ", "ENFP"]:
+        preferred_styles = ["story_format", "emotional", "dialogue_format", "qa_format"]
+    elif user_mbti in ["ISTJ", "ISFJ", "ESFJ"]:
+        preferred_styles = ["step_by_step", "bullet_points", "comparison", "tips_format"]
+    else:
+        preferred_styles = ["dialogue_format", "story_format", "emotional", "qa_format"]
+    
     style = random.choice(preferred_styles)
-    
-    # 過去の会話履歴から学んだことを抽出
-    history_insights = ""
-    if history:
-        recent_topics = []
-        for msg in history[-3:]:  # 最近3つのメッセージを分析
-            if "user:" in msg and len(msg) > 15:
-                # "user: メッセージ内容" の形式から内容を抽出
-                content = msg.split("user: ", 1)[1] if "user: " in msg else msg
-                recent_topics.append(content[:50] + "..." if len(content) > 50 else content)
-        if recent_topics:
-            history_insights = f"最近の相談内容: {', '.join(recent_topics)}"
     
     # 相性分析（簡単な相性判定）
     compatibility_notes = ""
@@ -3690,21 +3509,6 @@ def generate_personalized_advice(user_profile, question, history):
             compatibility_notes = "🤝 補完し合える相性です。相手の特徴を活かしたアプローチが効果的です。"
         else:
             compatibility_notes = "💫 刺激的な相性です！お互いの違いを楽しみながら、理解を深めることが大切です。"
-
-        # 質問タイプに応じた具体的な指示を追加
-    question_specific_instructions = {
-        "方法論・アプローチ": "具体的なステップや手順を分かりやすく説明してください。",
-        "原因分析・理由説明": "心理的な背景や理由を深く分析してください。",
-        "タイミング・時期": "適切なタイミングとその理由を説明してください。",
-        "場所・デートプラン": "具体的な場所やプランの提案をしてください。",
-        "具体的な内容・アイデア": "実践できる具体的なアイデアを提案してください。",
-        "感情・心理": "感情に寄り添い、心理的なサポートを提供してください。",
-        "LINE・メッセージ": "実際のメッセージ例を具体的に示してください。",
-        "関係性・告白": "関係性の段階に応じた適切なアドバイスをしてください。",
-        "一般的な相談": "総合的な視点からアドバイスを提供してください。"
-    }
-    
-    specific_instruction = question_specific_instructions.get(question_type, "総合的な視点からアドバイスを提供してください。")
     
     # パーソナライズされたプロンプトを構築
     personality_context = f"""
@@ -3760,32 +3564,24 @@ def generate_personalized_advice(user_profile, question, history):
 • 嫌いなNG行動: {', '.join(target_personality.get('disliked_ng_behaviors', []))}
 • 嫌いな人の特徴: {', '.join(target_personality.get('disliked_people_characteristics', []))}
 
+
 【相性分析】
 {compatibility_notes}
 
-【過去の相談】
-{history_insights}
+【レスポンススタイル】
+{style}で回答してください。
 
-【質問タイプ】
-{question_type}
-
-【回答の指示】
-• 絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください
-• 親しみやすいタメ口で、絵文字を適度に使ってください
-• 「あなた」「君」と呼びかけてください
-• 具体的で実践できるアドバイスを提供してください
-• 相手の性格を考慮したアプローチを提案してください
-• あなたの性格の強みを活かした方法を教えてください
-• 自然な会話の流れで、友達がアドバイスしているような感じで答えてください
-• 質問の内容に応じて、適切な回答スタイルを心がけてください
-• 上記の詳細情報を参考にして、個性的で実践的なアドバイスを提供してください
-• 毎回異なる視点やアプローチを提供してください
-• 相手の気持ちに寄り添い、共感を示しながらアドバイスしてください
-
-【参考情報】
-• あなたのLINE例: {random.choice(user_personality.get('line_examples', ['自然な会話を心がけてね']))}
-• 相手への告白例: {random.choice(target_personality.get('confession_examples', ['相手の気持ちを大切にしてね']))}
-• デート誘い例: {random.choice(target_personality.get('date_invitations', ['相手の好みを考えてね']))}
+【重要指示】
+1. 絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください
+2. 「ユーザー」ではなく「あなた」「君」など親しみやすい呼び方を使ってください
+3. 親しみやすくタメ口で絵文字も多めに使ってください
+4. 改行を効果的に使って、読みやすく構造化してください
+5. 難しい言葉は避けて、簡単で分かりやすい表現を使ってください
+6. 実際のLINEの例文を具体的に示してください（例：「お疲れさま〜！今日はどんな一日だった？」）
+7. 自分のMBTIと相手のMBTIの特徴を考慮して、相手に響くアプローチ方法を提案してください
+8. 相手の気持ちに寄り添い、共感を示しながらアドバイスしてください
+9. 具体的で実践できるアドバイスを提供してください
+10. 友達がアドバイスしているような自然な会話の流れを心がけてください
 """
     
     return personality_context
