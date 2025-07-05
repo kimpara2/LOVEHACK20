@@ -2963,9 +2963,12 @@ def classify_intent(message):
             "2: Thanks (thank you, thanks, ありがとう, どうも, etc.)\n"
             "3: Short reply (ok, yes, got it, わかった, うん, はい, 了解, etc.)\n"
             "4: Love advice (questions about love, dating, relationships, 恋愛, 相手, デート, 告白, etc.)\n"
-            "5: Casual chat (weather, hobbies, daily conversation, 天気, 趣味, 日常会話, etc.)\n"
-            "6: Other\n"
-            "Return only the number (1-6)."
+            "5: Casual chat (weather, hobbies, daily conversation, 天気, 趣味, 日常会話, 仕事, 学校, ニュース, 映画, 音楽, 食べ物, etc.)\n"
+            "6: General questions (general knowledge, how to, what is, why, 勉強, 知識, 方法, 理由, etc.)\n"
+            "7: Personal advice (life advice, career, study, health, 人生相談, キャリア, 健康, etc.)\n"
+            "8: Entertainment (jokes, fun, games, 冗談, 遊び, ゲーム, etc.)\n"
+            "9: Other\n"
+            "Return only the number (1-9)."
         )
         
         response = llm.invoke(f"{prompt}\n\nMessage: {message}")
@@ -2979,7 +2982,7 @@ def classify_intent(message):
     except Exception as e:
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[classify_intent] error: {e}\n")
-        return 6  # デフォルトは「その他」
+        return 9  # デフォルトは「その他」
 
 def classify_question_type(question):
     """質問のタイプを詳細に分類"""
@@ -3670,7 +3673,7 @@ def ask_ai_with_vector_db(user_id, question, user_profile, question_type="一般
         # パーソナライズされたアドバイスコンテキストを生成
         personality_context = generate_personalized_advice(user_profile, question, history, question_type)
         
-        # より詳細で構造化されたプロンプトを構築
+        # より自然で深掘り型のプロンプトを構築
         prompt = f"""
 {personality_context}
 
@@ -3756,7 +3759,21 @@ def generate_personalized_advice(user_profile, question, history, question_type=
         "pros_cons_format",   # メリット・デメリット形式
         "case_study_format",  # ケーススタディ形式
         "mindmap_format",     # マインドマップ形式
-        "action_plan_format"  # アクションプラン形式
+        "action_plan_format", # アクションプラン形式
+        "metaphor_format",    # 比喩形式
+        "analogy_format",     # 類推形式
+        "personal_experience", # 個人的体験談形式
+        "scientific_format",  # 科学的説明形式
+        "creative_format",    # 創造的表現形式
+        "humorous_format",    # ユーモア形式
+        "poetic_format",      # 詩的表現形式
+        "journal_format",     # 日記形式
+        "letter_format",      # 手紙形式
+        "conversation_format", # 会話形式
+        "deep_dive_format",   # 深掘り形式
+        "storytelling_format", # 物語形式
+        "reflection_format",  # 内省形式
+        "philosophical_format" # 哲学的思考形式
     ]
     
     # ユーザーのMBTIに基づいてレスポンススタイルを選択（より詳細で個性的）
@@ -3779,7 +3796,30 @@ def generate_personalized_advice(user_profile, question, history, question_type=
     else:  # デフォルト
         preferred_styles = ["dialogue_format", "story_format", "emotional", "qa_format", "tips_format"]
     
-    style = random.choice(preferred_styles)
+    # 質問の内容に基づいてスタイルを動的に調整
+    question_lower = question.lower()
+    
+    # 質問の内容に応じてスタイルを優先
+    if any(word in question_lower for word in ["どうやって", "方法", "手順", "ステップ"]):
+        style = random.choice(["step_by_step", "action_plan_format", "checklist_format"])
+    elif any(word in question_lower for word in ["なぜ", "理由", "原因", "どうして"]):
+        style = random.choice(["scientific_format", "comparison", "analogy_format"])
+    elif any(word in question_lower for word in ["例", "具体例", "シナリオ"]):
+        style = random.choice(["scenario_format", "case_study_format", "story_format"])
+    elif any(word in question_lower for word in ["気持ち", "感情", "不安", "心配"]):
+        style = random.choice(["emotional", "personal_experience", "letter_format"])
+    elif any(word in question_lower for word in ["LINE", "メッセージ", "文例"]):
+        style = random.choice(["dialogue_format", "conversation_format", "tips_format"])
+    elif any(word in question_lower for word in ["デート", "告白", "関係"]):
+        style = random.choice(["scenario_format", "timeline_format", "story_format"])
+    elif len(question) < 20:  # 短い質問
+        style = random.choice(["tips_format", "bullet_points", "simple_format"])
+    elif len(question) > 100:  # 長い質問
+        style = random.choice(["deep_dive_format", "storytelling_format", "reflection_format", "philosophical_format"])
+    elif any(word in question_lower for word in ["なぜ", "どうして", "本当に", "本質", "根本"]):
+        style = random.choice(["deep_dive_format", "philosophical_format", "reflection_format"])
+    else:
+        style = random.choice(preferred_styles)
     
     # 詳細な相性分析
     compatibility_notes = ""
@@ -3883,6 +3923,13 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 【レスポンススタイル】
 {style}で回答してください。
 
+【自然な会話のための特別指示】
+- 箇条書きや番号付きリストは避けてください
+- 一つの話題を深く掘り下げ、本質的な洞察を提供してください
+- 相手の気持ちに寄り添い、共感を示しながら回答してください
+- 時には「そうだね」「確かに」「でもね」などの自然な相槌を使ってください
+- 質問の奥にある真の意図を理解し、それに応じた回答を心がけてください
+
 【回答品質向上のための指示】
 1. **敬語完全禁止**: 絶対に敬語を使わないでください。「です・ます」ではなく「だよ・ね」を使う
 2. **MBTI名完全禁止**: 絶対にMBTI名（INTJ、INTP、ENTJなど）を回答に含めないでください
@@ -3898,10 +3945,23 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 12. **自己肯定感**: 自己肯定感を高めるアドバイスも含めてください
 13. **堅苦しい言葉を避ける**: 専門用語や堅苦しい表現は避け、親しみやすい言葉を使ってください
 14. **感情的な表現**: 共感や励ましを含めた感情的な表現を心がけてください
-15. **箇条書きを避ける**: 箇条書きではなく、自然な文章で流れるように説明してください
-16. 絵文字は積極的に使う
+15. **自然な会話形式**: 箇条書きや構造化を避け、友達との自然な会話のように流れるように説明してください
+16. **バリエーション重視**: 毎回異なる表現や構成を使い、同じような回答にならないようにする
+17. **質問に応じた調整**: 質問の内容や長さに応じて回答のスタイルや長さを調整する
+18. **創造性**: 比喩や類推、個人的体験談など、創造的な表現を積極的に使用する
+19. **感情の起伏**: 時には励まし、時には共感、時にはユーモアなど、感情の起伏を付ける
+20. **個性の表現**: あなたの個性や経験を織り交ぜた、オリジナルな回答を心がける
+21. 絵文字は積極的に使う
 
 【重要】絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください。
+
+【自然な会話のための最終指示】
+- 箇条書きや構造化を避け、友達との自然な会話のように流れるように説明してください
+- 一つの話題を深く掘り下げ、表面的なアドバイスではなく本質的な洞察を提供してください
+- 質問の奥にある真の意図や感情を理解し、それに寄り添った回答を心がけてください
+- 時には質問を返したり、相手の気持ちを確認したりして、双方向の会話を演出してください
+- 直近の回答と異なる表現や構成を使用し、創造的で個性的な表現を心がけてください
+- 感情の起伏を付けて、単調にならないようにしてください
 
 【最終チェックリスト】
 □ 敬語を使っていない（「です・ます」ではなく「だよ・ね」を使っている）
@@ -3910,6 +3970,9 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 □ 箇条書きや説明文でも「〜しましょう」ではなく「〜してね」を使っている
 □ 最初から最後まで一貫してタメ口で話している
 □ 女友達みたいな口調で絵文字がたくさん含まれているか
+□ 直近の回答とと異なる表現や構成を使っているか
+□ 質問の内容に応じた適切なスタイルを選択しているか
+□ 創造的で個性的な表現を使用しているか
 """
 
     
