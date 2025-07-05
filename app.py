@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify
-from langchain.vectorstores import Chroma
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
-from langchain.chains import RetrievalQA
+import openai
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -67,6 +64,7 @@ def send_chat_message_to_gas(user_id, mbti):
 
 # 🔐 OpenAI・Stripe・LINE設定
 openai_api_key = os.getenv("OPENAI_API_KEY")
+openai.api_key = openai_api_key  # OpenAI APIキーを設定
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 stripe_price_id = os.getenv("STRIPE_PRICE_ID")
 stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
@@ -2331,6 +2329,7 @@ MBTI_PERSONALITY = {
             "気持ちの不安定さ",
             "相手の気持ち理解の不足"
         ]
+    },
     "ESFP": {
         "traits": ["情熱的", "人付き合いが好き", "実用的", "臨機応変", "楽観的", "思いやり", "行動力"],
         "love_style": "楽しく刺激的な関係を求める恋愛スタイル。人付き合いが好きで楽観的、お互いを楽しませ合う関係を大切にする。実用的なサポートも提供して、思いやりと行動力で関係を発展させる。気持ち表現が豊かで、相手を幸せにする愛情表現を心がける。",
@@ -2480,8 +2479,6 @@ MBTI_PERSONALITY = {
         ]
     }
 }
-
-
 
 # MBTI診断用の質問とマッピング（グローバル定義）
 questions = [
@@ -2956,36 +2953,44 @@ def send_line_reply(reply_token, message):
 def classify_intent(message):
     """メッセージの意図を分類"""
     try:
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
-        prompt = (
-            "Classify the following message into one of these categories:\n"
-            "1: Greeting (hello, hi, good morning, good evening, こんにちは, こんばんは, おはよう, おやすみ, etc.)\n"
-            "2: Thanks (thank you, thanks, ありがとう, どうも, etc.)\n"
-            "3: Short reply (ok, yes, got it, わかった, うん, はい, 了解, etc.)\n"
-            "4: Love advice (questions about love, dating, relationships, 恋愛, 相手, デート, 告白, etc.)\n"
-            "5: Casual chat (weather, hobbies, daily conversation, 天気, 趣味, 日常会話, etc.)\n"
-            "6: Other\n"
-            "Return only the number (1-6)."
+        # ChatGPT APIを使用して意図分類
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Classify the following message into one of these categories:\n1: Greeting (hello, hi, good morning, good evening, こんにちは, こんばんは, おはよう, おやすみ, etc.)\n2: Thanks (thank you, thanks, ありがとう, どうも, etc.)\n3: Short reply (ok, yes, got it, わかった, うん, はい, 了解, etc.)\n4: Love advice (questions about love, dating, relationships, 恋愛, 相手, デート, 告白, etc.)\n5: Casual chat (weather, hobbies, daily conversation, 天気, 趣味, 日常会話, etc.)\n6: Other\nReturn only the number (1-6)."},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=10,
+            temperature=0.1
         )
-        
-        response = llm.invoke(f"{prompt}\n\nMessage: {message}")
-        result = int(response.content.strip())
+        result = int(response.choices[0].message.content.strip())
         
         # デバッグログを追加
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[classify_intent] message: {message}, response: {response.content}, result: {result}\n")
+            f.write(f"[classify_intent] message: {message}, response: {response.choices[0].message.content}, result: {result}\n")
         
         return result
     except Exception as e:
+        # エラー時はキーワードベースの分類にフォールバック
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[classify_intent] error: {e}\n")
-        return 6  # デフォルトは「その他」
+        message_lower = message.lower()
+        if any(word in message_lower for word in ['こんにちは', 'こんばんは', 'おはよう', 'おやすみ', 'hello', 'hi', 'good morning', 'good evening']):
+            return 1
+        elif any(word in message_lower for word in ['ありがとう', 'どうも', 'thank you', 'thanks']):
+            return 2
+        elif any(word in message_lower for word in ['わかった', 'うん', 'はい', '了解', 'ok', 'yes', 'got it']):
+            return 3
+        elif any(word in message_lower for word in ['恋愛', '相手', 'デート', '告白', 'love', 'dating', 'relationship']):
+            return 4
+        elif any(word in message_lower for word in ['天気', '趣味', '日常会話', 'weather', 'hobby', 'daily']):
+            return 5
+        else:
+            return 6
 
 def handle_casual_chat(user_id, message, user_profile):
     """雑談処理"""
     try:
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
-        
         # 雑談の種類を分析
         chat_type = analyze_casual_chat_type(message)
         
@@ -2993,20 +2998,17 @@ def handle_casual_chat(user_id, message, user_profile):
         user_mbti = user_profile.get('mbti', '不明')
         user_nickname = MBTI_NICKNAME.get(user_mbti, "恋愛探検家")
         
-        # 雑談タイプに応じたプロンプトを生成
-        chat_prompts = {
-            "日常会話": f"あなたは{user_nickname}の親友です。日常的な会話に自然に返してください。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。",
-            "感情共有": f"あなたは{user_nickname}の親友です。感情に共感し、励ましの言葉をかけてください。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。",
-            "趣味話題": f"あなたは{user_nickname}の親友です。趣味や興味について話してください。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。",
-            "天気・季節": f"あなたは{user_nickname}の親友です。天気や季節について話してください。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。",
-            "仕事・学校": f"あなたは{user_nickname}の親友です。仕事や学校について話してください。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。",
-            "その他": f"あなたは{user_nickname}の親友です。自然な会話をしてください。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。"
-        }
-        
-        prompt = f"{chat_prompts.get(chat_type, chat_prompts['その他'])}\nユーザーの発言: {message}\nこれは雑談です。恋愛アドバイスではなく、日常会話として返してください。"
-        
-        response = llm.invoke(prompt)
-        return response.content
+        # ChatGPT APIを使用して雑談レスポンス生成
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": f"あなたは{user_nickname}の親友です。{chat_type}について自然に返してください。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。これは雑談です。恋愛アドバイスではなく、日常会話として返してください。"},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=200,
+            temperature=0.8
+        )
+        return response.choices[0].message.content
     except Exception as e:
         # エラー時のフォールバックレスポンス
         fallback_responses = [
@@ -3524,9 +3526,25 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
 {question_type}
 """
         
-        answer = llm.invoke(prompt).content
+        # ChatGPT APIを使用してレスポンス生成
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": personality_context},
+                    {"role": "user", "content": f"【チャット履歴】\n{chr(10).join(history) if history else '初回の相談です'}\n\n【ユーザーの質問】\n{question}\n\n【質問タイプ】\n{question_type}"}
+                ],
+                max_tokens=1000,
+                temperature=0.7
+            )
+            answer = response.choices[0].message.content
+        except Exception as e:
+            # APIエラー時のフォールバック
+            answer = f"【{question_type}】についてのアドバイス：\n{question}について詳しく教えてくれると、もっと具体的なアドバイスができるよ！"
+            print(f"OpenAI API エラー: {e}")
+        
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[ask_ai_with_vector_db] LLM only answer: {answer}\n")
+            f.write(f"[ask_ai_with_vector_db] ChatGPT answer: {answer}\n")
         save_message(user_id, "user", question)
         save_message(user_id, "bot", answer)
         return answer
