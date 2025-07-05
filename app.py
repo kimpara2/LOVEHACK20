@@ -3539,51 +3539,49 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
                 temperature=0.7
             )
             answer = response.choices[0].message.content
+            
+            # 回答が正常に生成されたかチェック
+            if not answer or len(answer.strip()) < 10:
+                raise Exception("回答が短すぎるか空です")
+                
         except Exception as e:
-            # APIエラー時のフォールバック - 質問タイプに応じた応答
+            # APIエラー時のフォールバック - より自然な応答
             print(f"OpenAI API エラー: {e}")
             
-            # 質問タイプに応じたフォールバック応答
             user_mbti = user_profile.get('mbti', '不明')
             target_mbti = user_profile.get('target_mbti', '不明')
             user_personality = MBTI_PERSONALITY.get(user_mbti, {})
-            target_personality = MBTI_PERSONALITY.get(target_mbti, {})
             
-            # MBTI別の具体的なアドバイスを生成
-            def get_mbti_specific_advice(question_type, user_mbti, target_mbti):
+            # より自然なフォールバック応答を生成
+            def get_natural_fallback_response(question_type, question, user_mbti, target_mbti):
                 if question_type == "方法論・アプローチ":
-                    if user_mbti in ["INTJ", "INTP", "ENTJ", "ENTP"]:
-                        return f"【{question}】について、あなたの論理的思考を活かした段階的なアプローチを提案するね！\n\n1️⃣ まず現状を分析して、目標を明確にする\n2️⃣ 相手のMBTIタイプ（{target_mbti}）の特徴を考慮した計画を立てる\n3️⃣ 論理的に説明しながら、相手の理解を深める\n4️⃣ 結果を評価して、必要に応じて調整する\n\nあなたの分析力と計画性を活かせば、きっとうまくいくよ✨"
-                    elif user_mbti in ["INFJ", "INFP", "ENFJ", "ENFP"]:
-                        return f"【{question}】について、あなたの共感力と創造性を活かしたアプローチを提案するね！\n\n1️⃣ 相手の気持ちを理解し、共感を示す\n2️⃣ 創造的なアイデアで相手を驚かせる\n3️⃣ 相手のMBTIタイプ（{target_mbti}）に合わせた柔軟な対応をする\n4️⃣ 感情的なつながりを大切にしながら進める\n\nあなたの優しさと創造性が、きっと相手の心を動かすよ💕"
-                    else:
-                        return f"【{question}】について、あなたの実践的な性格を活かしたアプローチを提案するね！\n\n1️⃣ 具体的で実現可能な目標を設定する\n2️⃣ 相手のMBTIタイプ（{target_mbti}）の好みを考慮した方法を選ぶ\n3️⃣ 段階的に実行して、相手の反応を見ながら調整する\n4️⃣ 結果を重視しながら、関係を深めていく\n\nあなたの実践力と相手への配慮が成功の鍵だよ✨"
+                    return f"【{question}】について、あなたの性格に合った方法を教えるね！\n\nあなたの強みを活かして、相手の好みも考慮したアプローチを心がけてみて。段階的に進めていくのがおすすめだよ✨"
                 
                 elif question_type == "LINE・メッセージ":
                     line_examples = user_personality.get('line_examples', [])
                     if line_examples:
-                        return f"【{question}】について、あなたのMBTIタイプに合ったLINEメッセージ例を提案するね！\n\n💬 おすすめメッセージ例：\n{random.choice(line_examples)}\n\n相手のMBTIタイプ（{target_mbti}）の特徴も考慮して、相手が喜ぶメッセージを送ってみてね✨"
+                        return f"【{question}】について、あなたらしいメッセージ例を提案するね！\n\n💬 こんな感じはどう？\n{random.choice(line_examples)}\n\n相手の性格も考えて、自然な感じで送ってみてね✨"
                     else:
-                        return f"【{question}】について、あなたの性格に合ったLINEメッセージを提案するね！\n\n相手のMBTIタイプ（{target_mbti}）の好みを考慮して、相手が興味を持ちそうな話題から始めてみて。あなたらしい自然なメッセージが一番効果的だよ💕"
+                        return f"【{question}】について、あなたの性格に合ったメッセージを考えてみてね！\n\n相手が興味を持ちそうな話題から始めて、あなたらしい自然なメッセージが一番効果的だよ💕"
                 
                 elif question_type == "場所・デートプラン":
                     favorite_dates = user_personality.get('favorite_dates', [])
                     if favorite_dates:
-                        return f"【{question}】について、あなたの好みに合ったデートプランを提案するね！\n\n🎯 おすすめのデート場所：\n• {random.choice(favorite_dates)}\n• {random.choice(favorite_dates) if len(favorite_dates) > 1 else 'あなたの興味に合った場所'}\n\n相手のMBTIタイプ（{target_mbti}）の特徴も考慮して、二人が楽しめる場所を選んでみてね✨"
+                        return f"【{question}】について、あなたの好みに合った場所を提案するね！\n\n🎯 こんな場所はどう？\n• {random.choice(favorite_dates)}\n\n相手の好みも考えながら、二人が楽しめる場所を選んでみてね✨"
                     else:
-                        return f"【{question}】について、あなたと相手のMBTIタイプ（{target_mbti}）に合ったデートプランを提案するね！\n\n相手の好みを考慮しながら、あなたも楽しめる場所を選ぶことが大切だよ💕"
+                        return f"【{question}】について、あなたと相手の好みを考えた場所を選んでみてね！\n\n相手が喜びそうな場所で、あなたも楽しめるのが一番だよ💕"
                 
                 elif question_type == "関係性・告白":
                     confession_examples = user_personality.get('confession_examples', [])
                     if confession_examples:
-                        return f"【{question}】について、あなたのMBTIタイプに合った告白方法を提案するね！\n\n💝 おすすめの告白例：\n{random.choice(confession_examples)}\n\n相手のMBTIタイプ（{target_mbti}）の特徴も考慮して、相手が受け入れやすい方法で告白してみてね✨"
+                        return f"【{question}】について、あなたらしい告白方法を提案するね！\n\n💝 こんな感じはどう？\n{random.choice(confession_examples)}\n\n相手が安心できる環境で、あなたらしい方法で告白してみてね✨"
                     else:
-                        return f"【{question}】について、あなたの性格に合った告白方法を提案するね！\n\n相手のMBTIタイプ（{target_mbti}）の好みを考慮して、相手が安心できる環境で、あなたらしい方法で告白してみて💕"
+                        return f"【{question}】について、あなたの性格に合った告白方法を考えてみてね！\n\n相手が安心できる環境で、あなたらしい方法で告白してみて💕"
                 
                 else:
-                    return f"【{question}】について、あなたのMBTIタイプ（{user_mbti}）と相手のMBTIタイプ（{target_mbti}）を考慮したアドバイスをするね！\n\nあなたの性格特徴を活かしながら、相手の好みも理解して、二人の相性に合ったアプローチを心がけてみてね✨"
+                    return f"【{question}】について、あなたの性格を活かしたアドバイスをするね！\n\n相手の好みも理解しながら、二人の相性に合ったアプローチを心がけてみてね✨"
             
-            answer = get_mbti_specific_advice(question_type, user_mbti, target_mbti)
+            answer = get_natural_fallback_response(question_type, question, user_mbti, target_mbti)
         
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write(f"[ask_ai_with_vector_db] ChatGPT answer: {answer}\n")
@@ -3756,43 +3754,29 @@ def generate_personalized_advice(user_profile, question, history):
 【相性分析】
 {compatibility_notes}
 
-【過去の相談履歴】
+【過去の相談】
 {history_insights}
 
 【質問タイプ】
 {question_type}
 
-【レスポンススタイル】
-{style}で回答してください。
+【回答の指示】
+• 絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください
+• 親しみやすいタメ口で、絵文字を適度に使ってください
+• 「あなた」「君」と呼びかけてください
+• 具体的で実践できるアドバイスを提供してください
+• 相手の性格を考慮したアプローチを提案してください
+• あなたの性格の強みを活かした方法を教えてください
+• 自然な会話の流れで、友達がアドバイスしているような感じで答えてください
+• 質問の内容に応じて、適切な回答スタイルを心がけてください
+• 上記の詳細情報を参考にして、個性的で実践的なアドバイスを提供してください
+• 毎回異なる視点やアプローチを提供してください
+• 相手の気持ちに寄り添い、共感を示しながらアドバイスしてください
 
-【質問タイプ別指示】
-{specific_instruction}
-
-【重要指示】
-1. 絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください
-2. 「ユーザー」ではなく「あなた」「君」など親しみやすい呼び方を使ってください
-3. 親しみやすくタメ口で絵文字も多めに使ってください
-4. 改行を効果的に使って、読みやすく構造化してください
-5. 難しい言葉は避けて、簡単で分かりやすい表現を使ってください
-6. 実際のLINEの例文を具体的に示してください（例：「お疲れさま〜！今日はどんな一日だった？」）
-7. 自分のMBTIと相手のMBTIの特徴を考慮して、相手に響くアプローチ方法を提案してください
-8. 相手の気持ちに寄り添い、共感を示しながらアドバイスしてください
-9. 具体的で実践できるアドバイスを提供してください
-10. 友達がアドバイスしているような自然な会話の流れを心がけてください
-11. 過去の会話履歴を参考にして、一貫性のあるアドバイスをしてください
-12. 毎回異なる視点やアプローチを提供してください
-13. 質問タイプに応じた適切な回答スタイルを心がけてください
-14. デート誘い文句や告白の言葉例を参考にして、具体的な表現を提案してください
-15. 以下のLINE例や会話例を参考にして、具体的で実践的なアドバイスを提供してください
-
-【参考LINE例】
-{chr(10).join(user_personality.get('line_examples', []))}
-
-【参考会話例】
-{chr(10).join(user_personality.get('conversation_examples', []))}
-
-【参考LINEメッセージテンプレート】
-{chr(10).join(user_personality.get('line_message_templates', []))}
+【参考情報】
+• あなたのLINE例: {random.choice(user_personality.get('line_examples', ['自然な会話を心がけてね']))}
+• 相手への告白例: {random.choice(target_personality.get('confession_examples', ['相手の気持ちを大切にしてね']))}
+• デート誘い例: {random.choice(target_personality.get('date_invitations', ['相手の好みを考えてね']))}
 """
     
     return personality_context
