@@ -2812,7 +2812,8 @@ def process_user_message(user_id, message, user_profile):
             customer_id = row[0] if row else None
             if not customer_id:
                 conn.close()
-                return "ご利用履歴が見つかりませんでした。"
+                # より親切なエラーメッセージ
+                return "申し訳ございません。決済情報が見つかりませんでした。\n\nお手数ですが、以下の方法で解約をお願いします：\n\n1. Stripeのカスタマーポータルに直接アクセス\n2. お支払い方法の管理画面から解約手続き\n3. サポートまでご連絡いただく\n\nご不便をおかけして申し訳ございません。"
             try:
                 session = stripe.billing_portal.Session.create(
                     customer=customer_id,
@@ -3161,6 +3162,25 @@ def generate_compatibility_strategy(user_mbti, target_mbti, compatibility_notes)
     except Exception as e:
         return "相性に基づく戦略を生成中です。"
 
+def handle_emotional_support(user_id, message, user_profile):
+    """感情的なサポート・慰め処理"""
+    try:
+        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        prompt = (
+            f"あなたはMBTI診断ベースの女性の恋愛マスターの友達です。\n"
+            f"ユーザー情報: あなたのMBTI: {user_profile.get('mbti', '不明')}, あなたの性別: {user_profile.get('gender', '不明')}\n"
+            f"ユーザーの発言: {message}\n"
+            f"ユーザーは今つらい気持ちや悲しい気持ちを表現しています。\n"
+            f"アドバイスではなく、まずは共感と慰めを心がけてください。\n"
+            f"親しみやすくタメ口で絵文字も使って、短めに（150文字以内）返してください。\n"
+            f"具体的な解決策は求めず、気持ちに寄り添うことを最優先にしてください。"
+        )
+        
+        response = llm.invoke(prompt)
+        return response.content
+    except Exception as e:
+        return "つらかったね💕 あなたの気持ち、よくわかるよ✨"
+
 def handle_casual_chat(user_id, message, user_profile):
     """雑談処理"""
     try:
@@ -3200,6 +3220,10 @@ def process_ai_chat(user_id, message, user_profile):
             elif intent == 3:  # 短い返事
                 return "うん、また何かあったら教えてね！"
             elif intent == 4:  # 恋愛相談
+                # 慰めや共感が必要かどうかを判定
+                if any(word in message for word in ["つらい", "悲しい", "落ち込んでる", "辛い", "しんどい", "疲れた", "嫌だ", "もう嫌", "諦め", "無理"]):
+                    return handle_emotional_support(user_id, message, user_profile)
+                
                 # 質問タイプを分類
                 question_type_num = classify_question_type(message)
                 question_types = [
@@ -3219,6 +3243,10 @@ def process_ai_chat(user_id, message, user_profile):
             elif intent == 5:  # 雑談
                 return handle_casual_chat(user_id, message, user_profile)
             else:  # その他（恋愛相談として処理）
+                # 慰めや共感が必要かどうかを判定
+                if any(word in message for word in ["つらい", "悲しい", "落ち込んでる", "辛い", "しんどい", "疲れた", "嫌だ", "もう嫌", "諦め", "無理"]):
+                    return handle_emotional_support(user_id, message, user_profile)
+                
                 # 質問タイプを分類
                 question_type_num = classify_question_type(message)
                 question_types = [
@@ -3490,9 +3518,12 @@ def stripe_webhook():
         # user_idを特定
         obj = event["data"]["object"]
         user_id = None
+        customer_id = None
+        
         # checkout.session.completedの場合
         if "metadata" in obj and "user_id" in obj["metadata"]:
             user_id = obj["metadata"]["user_id"]
+            customer_id = obj.get("customer")
         # invoice.payment_succeededの場合（customer_idからuser_idを逆引き）
         elif "customer" in obj:
             customer_id = obj["customer"]
@@ -3503,7 +3534,17 @@ def stripe_webhook():
             if row:
                 user_id = row[0]
             conn.close()
+        
         if user_id:
+            # stripe_customersテーブルにデータを保存（まだ存在しない場合のみ）
+            if customer_id:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("INSERT OR IGNORE INTO stripe_customers (user_id, customer_id) VALUES (?, ?)", (user_id, customer_id))
+                conn.commit()
+                conn.close()
+                print(f"✅ stripe_customersテーブルに保存: user_id={user_id}, customer_id={customer_id}")
+            
             handle_payment_completion(user_id)
             print(f"✅ 決済完了処理実行: user_id={user_id}")
         else:
@@ -3784,6 +3825,7 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 - 友達感覚で自然なタメ口で話してください
 - 相手へのアプローチ方法を説明する時も絶対に敬語を使わないでください
 - 箇条書きや説明文でも「〜しましょう」「〜してください」ではなく「〜してね」「〜してみて」を使う
+- 絵文字は積極的に使う
 
 【ユーザーの特徴】
 • MBTI: {user_mbti}
@@ -3857,6 +3899,7 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 13. **堅苦しい言葉を避ける**: 専門用語や堅苦しい表現は避け、親しみやすい言葉を使ってください
 14. **感情的な表現**: 共感や励ましを含めた感情的な表現を心がけてください
 15. **箇条書きを避ける**: 箇条書きではなく、自然な文章で流れるように説明してください
+16. 絵文字は積極的に使う
 
 【重要】絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください。
 
@@ -3866,6 +3909,7 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 □ 相手へのアドバイス文でも敬語を使っていない
 □ 箇条書きや説明文でも「〜しましょう」ではなく「〜してね」を使っている
 □ 最初から最後まで一貫してタメ口で話している
+□ 女友達みたいな口調で絵文字がたくさん含まれているか
 """
 
     
