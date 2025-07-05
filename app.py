@@ -3507,7 +3507,8 @@ def ask_ai_with_vector_db(user_id, question, user_profile):
         return "有料会員のみ利用できます"
     history = get_recent_history(user_id)
     try:
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        # 質問タイプを分析
+        question_type = analyze_question_type(question)
         
         # パーソナライズされたアドバイスコンテキストを生成
         personality_context = generate_personalized_advice(user_profile, question, history)
@@ -3608,6 +3609,8 @@ def generate_personalized_advice(user_profile, question, history):
         "一般的な相談": ["dialogue_format", "story_format", "qa_format"]
     }
     
+    # 質問タイプを分析
+    question_type = analyze_question_type(question)
     preferred_styles = style_mapping.get(question_type, ["dialogue_format", "story_format", "qa_format"])
     style = random.choice(preferred_styles)
     
