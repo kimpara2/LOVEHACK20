@@ -71,6 +71,12 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 stripe_price_id = os.getenv("STRIPE_PRICE_ID")
 stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
+# 環境変数の確認
+if not openai_api_key:
+    print("⚠️ 警告: OPENAI_API_KEYが設定されていません。AI機能が動作しません。")
+    # 開発環境用のダミーキー（実際のAPI呼び出しは失敗します）
+    openai_api_key = "dummy_key_for_development"
+
 # 💾 データベースパス設定（環境に応じて切り替え）
 DB_PATH = os.getenv("DB_PATH", "/data/user_data.db")  # 本番環境では永続ディスクを使用
 
@@ -2521,9 +2527,17 @@ def init_db():
             target_mbti TEXT,
             is_paid INTEGER DEFAULT 0,
             mode TEXT,
-            mbti_answers TEXT
+            mbti_answers TEXT,
+            customer_id TEXT
         )
     ''')
+    
+    # 既存のテーブルにcustomer_idカラムが存在しない場合は追加
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN customer_id TEXT")
+        print("customer_idカラムを追加しました")
+    except sqlite3.OperationalError:
+        print("customer_idカラムは既に存在します")
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS messages (
             user_id TEXT,
@@ -2744,7 +2758,7 @@ def get_payment_message(user_id):
             # Stripe Checkout Sessionを作成
             checkout_session = stripe.checkout.Session.create(
                 payment_method_types=['card'],
-                line_items=[{
+            line_items=[{
                     'price': stripe_price_id,
                     'quantity': 1,
                 }],
@@ -2804,30 +2818,50 @@ def process_user_message(user_id, message, user_profile):
         # 2. 解約ワード
         if message in ["解約", "キャンセル", "やめる", "退会"]:
             if not user_profile.get('is_paid', False):
-                return "この機能は有料会員様限定です。"
+                return "この機能は有料会員限定だよ！"
+            
+            # デバッグ情報を追加
+            print(f"🔍 解約処理開始: user_id={user_id}")
+            
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT customer_id FROM stripe_customers WHERE user_id=?", (user_id,))
+            
+            # まずusersテーブルからcustomer_idを取得してみる
+            cursor.execute("SELECT customer_id FROM users WHERE user_id=?", (user_id,))
             row = cursor.fetchone()
             customer_id = row[0] if row else None
+            
+            # usersテーブルにない場合はstripe_customersテーブルから取得
+            if not customer_id:
+                cursor.execute("SELECT customer_id FROM stripe_customers WHERE user_id=?", (user_id,))
+                row = cursor.fetchone()
+                customer_id = row[0] if row else None
+            
+            print(f"🔍 データベースから取得したcustomer_id: {customer_id}")
+            
             if not customer_id:
                 conn.close()
+                print(f"❌ customer_idが見つからない: user_id={user_id}")
                 # より親切なエラーメッセージ
                 return "申し訳ございません。決済情報が見つかりませんでした。\n\nお手数ですが、以下の方法で解約をお願いします：\n\n1. Stripeのカスタマーポータルに直接アクセス\n2. お支払い方法の管理画面から解約手続き\n3. サポートまでご連絡いただく\n\nご不便をおかけして申し訳ございません。"
+            
             try:
+                print(f"🔍 Stripe Customer Portal作成開始: customer_id={customer_id}")
                 session = stripe.billing_portal.Session.create(
                     customer=customer_id,
                     return_url=os.getenv("BASE_URL", "https://lovehack20.onrender.com") + "/return"
                 )
                 portal_url = session.url
+                print(f"✅ Customer Portal作成成功: {portal_url}")
             except Exception as e:
                 conn.close()
                 print(f"❌ Customer Portal発行エラー: {e}")
-                return "解約ページの発行に失敗しました。時間をおいて再度お試しください。"
+                return "解約ページの発行に失敗したよ😅 時間をおいて再度お試ししてね！"
+            
             cursor.execute("UPDATE users SET is_paid=0 WHERE user_id=?", (user_id,))
             conn.commit()
             conn.close()
-            return f"ご解約・お支払い管理はこちらから行えます：\n{portal_url}\n\n解約手続きが完了するとAI相談機能も停止します。"
+            return f"解約・お支払い管理はこちらからできるよ：\n{portal_url}\n\n解約手続きが完了するとAI相談機能も停止するよ！"
 
         # 3. 初回ユーザー
         if not user_profile:
@@ -2869,7 +2903,7 @@ def process_user_message(user_id, message, user_profile):
                 cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
                 conn.commit()
                 conn.close()
-                return "性別を教えてね！【男】か【女】で答えてください。"
+                return "性別を教えてね！【男】か【女】で答えてね！"
             elif message == "相手MBTI登録":
                 conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
@@ -2878,7 +2912,7 @@ def process_user_message(user_id, message, user_profile):
                 conn.close()
                 return "相手のMBTIを教えてね！（例：INTJ、ENFP）"
             else:
-                return "📌専属恋愛AIのお喋り機能は有料会員様限定です！\n恋愛傾向診断を始めて有料会員になりたい場合は『診断開始』と送ってね✨"
+                return "📌専属恋愛AIのお喋り機能は有料会員限定だよ！\n恋愛傾向診断を始めて有料会員になりたい場合は『診断開始』と送ってね✨"
 
         # 7. 有料ユーザーの通常処理
         if message == "診断開始":
@@ -2889,7 +2923,7 @@ def process_user_message(user_id, message, user_profile):
             cursor.execute("UPDATE users SET mode='register_gender' WHERE user_id=?", (user_id,))
             conn.commit()
             conn.close()
-            return "性別を教えてね！【男】か【女】で答えてください。"
+            return "性別を教えてね！【男】か【女】で答えてね！"
         elif message == "相手MBTI登録":
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
@@ -2903,7 +2937,7 @@ def process_user_message(user_id, message, user_profile):
         import traceback
         print(f"process_user_message エラー: {e}")
         traceback.print_exc()
-        return "エラーが発生しました。もう一度お試しください。"
+        return "エラーが発生したよ😅 もう一度お試ししてね！"
 
 # LINEリプライ送信関数
 def send_line_reply(reply_token, message):
@@ -2956,6 +2990,10 @@ def send_line_reply(reply_token, message):
 def classify_intent(message):
     """メッセージの意図を分類"""
     try:
+        if not openai_api_key or openai_api_key == "dummy_key_for_development":
+            print("⚠️ OpenAI APIキーが設定されていません")
+            return 9  # デフォルトは「その他」
+        
         llm = ChatOpenAI(openai_api_key=openai_api_key)
         prompt = (
             "Classify the following message into one of these categories:\n"
@@ -2987,6 +3025,10 @@ def classify_intent(message):
 def classify_question_type(question):
     """質問のタイプを詳細に分類"""
     try:
+        if not openai_api_key or openai_api_key == "dummy_key_for_development":
+            print("⚠️ OpenAI APIキーが設定されていません")
+            return 9  # デフォルトは「一般的な相談」
+        
         llm = ChatOpenAI(openai_api_key=openai_api_key)
         prompt = (
             "以下の質問を最も適切なカテゴリに分類してください：\n"
@@ -3085,7 +3127,7 @@ def analyze_chat_history(history, user_profile):
         
         return analysis
     except Exception as e:
-        return "過去の相談内容を分析中です。"
+        return "過去の相談内容を分析中だよ！"
 
 def generate_compatibility_strategy(user_mbti, target_mbti, compatibility_notes):
     """相性に基づくアプローチ戦略を生成"""
@@ -3163,20 +3205,25 @@ def generate_compatibility_strategy(user_mbti, target_mbti, compatibility_notes)
         
         return strategy
     except Exception as e:
-        return "相性に基づく戦略を生成中です。"
+        return "相性に基づく戦略を生成中だよ！"
 
 def handle_emotional_support(user_id, message, user_profile):
     """感情的なサポート・慰め処理"""
     try:
+        if not openai_api_key or openai_api_key == "dummy_key_for_development":
+            print("⚠️ OpenAI APIキーが設定されていません")
+            return "つらかったね💕 あなたの気持ち、よくわかるよ✨"
+        
         llm = ChatOpenAI(openai_api_key=openai_api_key)
         prompt = (
-            f"あなたはMBTI診断ベースの女性の恋愛マスターの友達です。\n"
+            f"あなたはMBTI診断ベースの女性の恋愛マスターの友達だよ。\n"
             f"ユーザー情報: あなたのMBTI: {user_profile.get('mbti', '不明')}, あなたの性別: {user_profile.get('gender', '不明')}\n"
             f"ユーザーの発言: {message}\n"
-            f"ユーザーは今つらい気持ちや悲しい気持ちを表現しています。\n"
-            f"アドバイスではなく、まずは共感と慰めを心がけてください。\n"
-            f"親しみやすくタメ口で絵文字も使って、短めに（150文字以内）返してください。\n"
-            f"具体的な解決策は求めず、気持ちに寄り添うことを最優先にしてください。"
+            f"ユーザーは今つらい気持ちや悲しい気持ちを表現してるよ。\n"
+            f"アドバイスではなく、まずは共感と慰めを心がけてね。\n"
+            f"親しみやすく絶対にタメ口で絵文字も使って、短めに（150文字以内）返してね。\n"
+            f"具体的な解決策は求めず、気持ちに寄り添うことを最優先にしてね。\n"
+            f"絶対に敬語を使わず、タメ口で話してね！"
         )
         
         response = llm.invoke(prompt)
@@ -3187,13 +3234,18 @@ def handle_emotional_support(user_id, message, user_profile):
 def handle_casual_chat(user_id, message, user_profile):
     """雑談処理"""
     try:
+        if not openai_api_key or openai_api_key == "dummy_key_for_development":
+            print("⚠️ OpenAI APIキーが設定されていません")
+            return "うん、そうだね！😊"
+        
         llm = ChatOpenAI(openai_api_key=openai_api_key)
         prompt = (
-            f"あなたはMBTI診断ベースの女性の恋愛マスターの友達です。\n"
+            f"あなたはMBTI診断ベースの女性の恋愛マスターの友達だよ。\n"
             f"ユーザー情報: あなたのMBTI: {user_profile.get('mbti', '不明')}, あなたの性別: {user_profile.get('gender', '不明')}\n"
             f"ユーザーの発言: {message}\n"
-            f"これは雑談です。親しみやすくタメ口で絵文字も使って、短めに（100文字以内）返してください。\n"
-            f"恋愛アドバイスではなく、日常会話として返してください。"
+            f"これは雑談だよ。親しみやすく絶対にタメ口で絵文字も使って、短めに（100文字以内）返してね。\n"
+            f"恋愛アドバイスではなく、日常会話として返してね。\n"
+            f"絶対に敬語を使わず、タメ口で話してね！"
         )
         
         response = llm.invoke(prompt)
@@ -3287,7 +3339,7 @@ def process_ai_chat(user_id, message, user_profile):
             f.write(f"[process_ai_chat] Exception: {e}\n")
             f.write(traceback.format_exc() + "\n")
         traceback.print_exc()
-        return "申し訳ありません。エラーが発生しました。時間を置いて再度お試しください。"
+        return "ごめんね、エラーが発生したよ😅 時間を置いて再度お試ししてね！"
 
 # LINE Webhookエンドポイント
 @app.route("/webhook", methods=["POST"])
@@ -3539,14 +3591,15 @@ def stripe_webhook():
             conn.close()
         
         if user_id:
-            # stripe_customersテーブルにデータを保存（まだ存在しない場合のみ）
+            # stripe_customersテーブルとusersテーブルの両方にcustomer_idを保存
             if customer_id:
                 conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
-                cursor.execute("INSERT OR IGNORE INTO stripe_customers (user_id, customer_id) VALUES (?, ?)", (user_id, customer_id))
+                cursor.execute("INSERT OR REPLACE INTO stripe_customers (user_id, customer_id) VALUES (?, ?)", (user_id, customer_id))
+                cursor.execute("UPDATE users SET customer_id=? WHERE user_id=?", (customer_id, user_id))
                 conn.commit()
                 conn.close()
-                print(f"✅ stripe_customersテーブルに保存: user_id={user_id}, customer_id={customer_id}")
+                print(f"✅ customer_idを両テーブルに保存: user_id={user_id}, customer_id={customer_id}")
             
             handle_payment_completion(user_id)
             print(f"✅ 決済完了処理実行: user_id={user_id}")
@@ -3616,6 +3669,10 @@ def get_qa_chain(user_profile):
     print("=== retriever repr:", repr(retriever), "===")
     with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
         f.write(f"retriever type: {type(retriever)}\n")
+    if not openai_api_key or openai_api_key == "dummy_key_for_development":
+        print("⚠️ OpenAI APIキーが設定されていません")
+        raise ValueError("OpenAI APIキーが設定されていません")
+    
     llm = ChatOpenAI(openai_api_key=openai_api_key)
     return RetrievalQA.from_chain_type(llm=llm, retriever=retriever), llm
 
@@ -3661,47 +3718,50 @@ def ask_ai_with_vector_db(user_id, question, user_profile, question_type="一般
     if not question:
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write("[ask_ai_with_vector_db] question is empty\n")
-        return "質問が空です"
+        return "質問が空だよ😅"
     if not user_profile.get("is_paid"):
         with open("/data/logs/debug.log", "a", encoding="utf-8") as f:
             f.write("[ask_ai_with_vector_db] user is not paid\n")
-        return "有料会員のみ利用できます"
+        return "有料会員のみ利用できるよ！"
     history = get_recent_history(user_id)
     try:
+        if not openai_api_key or openai_api_key == "dummy_key_for_development":
+            print("⚠️ OpenAI APIキーが設定されていません")
+            return "ごめんね、AI機能が一時的に利用できないよ😅 しばらく待ってから再度お試ししてね！"
+        
         llm = ChatOpenAI(openai_api_key=openai_api_key)
         
         # パーソナライズされたアドバイスコンテキストを生成
         personality_context = generate_personalized_advice(user_profile, question, history, question_type)
         
-        # より自然で深掘り型のプロンプトを構築
+        # より明確で効果的なプロンプトを構築
         prompt = f"""
 {personality_context}
 
 【チャット履歴】
-{chr(10).join(history) if history else "初回の相談です"}
+{chr(10).join(history) if history else "初回の相談だよ！"}
 
 【履歴分析】
-{analyze_chat_history(history, user_profile) if history else "初回の相談のため、過去の相談内容はありません。"}
-
-【ユーザーの質問】
-{question}
+{analyze_chat_history(history, user_profile) if history else "初回の相談だから、過去の相談内容はないよ！"}
 
 【回答の品質向上のための指示】
-1. **自然な会話**: 友達がアドバイスしているような自然な会話の流れを心がけてください
-2. **親しみやすい表現**: 「あなた」「君」と呼びかけ、タメ口で絵文字を適度に使用してください
-3. **具体的で実践的**: 抽象的なアドバイスではなく、すぐに実行できる具体的なステップを提供してください
-4. 絶対にあなたのMBTIの特徴と相手の特徴に合わせたアプローチを提案してください。
-5. **感情に寄り添う**: 相手の気持ちを理解し、共感を示しながらアドバイスしてください。
-6. **リスク管理**: 失敗した場合の対処法も含めてアドバイスしてください
-7. **絶対にMBTI名を回答に含めない**: ENTJ、INFPなどのMBTI名は使用しないでください
-8. **構造化**: 改行を効果的に使用して読みやすく構造化してください
-9. 必要であれば実際のLINEの例文やシナリオを具体的に示してください
-10. **個性的な表現**: 毎回異なる視点やアプローチを提供してください
-11. **自己肯定感**: 自己肯定感を高めるアドバイスも含めてください
-12. **堅苦しい言葉を避ける**: 専門用語や堅苦しい表現は避け、親しみやすい言葉を使ってください
-13. **感情的な表現**: 共感や励ましを含めた感情的な表現を心がけてください
+1. **MBTI組み合わせを活用**: 『{user_profile.get('mbti', '不明')}』のあなたが『{user_profile.get('target_mbti', '不明')}』の相手に対して取るべき最適なアプローチを提案してね
+2. **自然な会話**: 友達がアドバイスしているような自然な会話の流れを心がけてね
+3. **親しみやすい表現**: 「あなた」「君」と呼びかけ、絶対にタメ口で絵文字を適度に使ってね
+4. **具体的で実践的**: 抽象的なアドバイスではなく、すぐに実行できる具体的なステップを提供してね
+5. **相手の特徴を活かしたアプローチ**: 相手のMBTIの特徴を理解して、相手が喜ぶアプローチを提案してね
+6. **感情に寄り添う**: 相手の気持ちを理解し、共感を示しながらアドバイスしてね
+7. **リスク管理**: 失敗した場合の対処法も含めてアドバイスしてね
+8. **絶対にMBTI名を回答に含めない**: ENTJ、INFPなどのMBTI名は使用しないでね
+9. **構造化**: 改行を効果的に使用して読みやすく構造化してね
+10. 必要であれば実際のLINEの例文やシナリオを具体的に示してね
+11. **個性的な表現**: 毎回異なる視点やアプローチを提供してね
+12. **自己肯定感**: 自己肯定感を高めるアドバイスも含めてね
+13. **堅苦しい言葉を避ける**: 専門用語や堅苦しい表現は避け、親しみやすい言葉を使ってね
+14. **感情的な表現**: 共感や励ましを含めた感情的な表現を心がけてね
+15. **絶対に敬語を使わない**: 「です」「ます」「ございます」などの敬語は一切使わず、タメ口で話してね
 
-【重要】絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください。
+【重要】絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでね。そして絶対に敬語を使わず、タメ口で話してね！
 """
         
         answer = llm.invoke(prompt).content
@@ -3733,93 +3793,70 @@ def generate_personalized_advice(user_profile, question, history, question_type=
     user_nickname = MBTI_NICKNAME.get(user_mbti, "恋愛探検家")
     target_nickname = MBTI_NICKNAME.get(target_mbti, "恋愛相手")
     
-    # mbti_advice.jsonから詳細なアドバイスを取得
-    try:
-        with open('mbti_advice.json', 'r', encoding='utf-8') as f:
-            mbti_advice_data = json.load(f)
-        user_detailed_advice = mbti_advice_data.get(user_mbti, "")
-        target_detailed_advice = mbti_advice_data.get(target_mbti, "")
-    except:
-        user_detailed_advice = ""
-        target_detailed_advice = ""
+    # 過去の会話から繰り返しパターンを検出
+    recent_responses = []
+    if history:
+        for msg in history[-10:]:  # 直近10件のメッセージをチェック
+            if msg.startswith("bot:"):
+                recent_responses.append(msg[4:].strip())
     
-    # レスポンススタイルを決定（より自然で親しみやすい形式）
-    response_styles = [
-        "bullet_points",      # 箇条書き
-        "story_format",       # 物語形式
-        "dialogue_format",    # 対話形式
-        "step_by_step",       # ステップ形式
-        "comparison",         # 比較形式
-        "emotional",          # 感情重視
-        "tips_format",        # ティップス形式
-        "qa_format",          # Q&A形式
-        "scenario_format",    # シナリオ形式
-        "checklist_format",   # チェックリスト形式
-        "timeline_format",    # タイムライン形式
-        "pros_cons_format",   # メリット・デメリット形式
-        "case_study_format",  # ケーススタディ形式
-        "mindmap_format",     # マインドマップ形式
-        "action_plan_format", # アクションプラン形式
-        "metaphor_format",    # 比喩形式
-        "analogy_format",     # 類推形式
-        "personal_experience", # 個人的体験談形式
-        "scientific_format",  # 科学的説明形式
-        "creative_format",    # 創造的表現形式
-        "humorous_format",    # ユーモア形式
-        "poetic_format",      # 詩的表現形式
-        "journal_format",     # 日記形式
-        "letter_format",      # 手紙形式
-        "conversation_format", # 会話形式
-        "deep_dive_format",   # 深掘り形式
-        "storytelling_format", # 物語形式
-        "reflection_format",  # 内省形式
-        "philosophical_format" # 哲学的思考形式
-    ]
-    
-    # ユーザーのMBTIに基づいてレスポンススタイルを選択（より詳細で個性的）
-    if user_mbti in ["INTJ", "INTP"]:  # 分析的な思考者
-        preferred_styles = ["bullet_points", "step_by_step", "comparison", "pros_cons_format", "case_study_format"]
-    elif user_mbti in ["ENTJ", "ESTJ"]:  # 決断力のあるリーダー
-        preferred_styles = ["action_plan_format", "checklist_format", "step_by_step", "bullet_points", "timeline_format"]
-    elif user_mbti in ["INFJ", "INFP"]:  # 理想主義者
-        preferred_styles = ["story_format", "emotional", "scenario_format", "mindmap_format", "dialogue_format"]
-    elif user_mbti in ["ENFJ", "ENFP"]:  # 社交的な理想主義者
-        preferred_styles = ["dialogue_format", "story_format", "emotional", "scenario_format", "qa_format"]
-    elif user_mbti in ["ISTJ", "ISFJ"]:  # 実務的な保守主義者
-        preferred_styles = ["checklist_format", "step_by_step", "bullet_points", "timeline_format", "tips_format"]
-    elif user_mbti in ["ESFJ"]:  # 社交的な実務家
-        preferred_styles = ["dialogue_format", "tips_format", "checklist_format", "story_format", "qa_format"]
-    elif user_mbti in ["ISTP", "ISFP"]:  # 実践的な冒険者
-        preferred_styles = ["action_plan_format", "scenario_format", "step_by_step", "tips_format", "bullet_points"]
-    elif user_mbti in ["ESTP", "ESFP"]:  # 社交的な冒険者
-        preferred_styles = ["scenario_format", "dialogue_format", "action_plan_format", "story_format", "tips_format"]
-    else:  # デフォルト
-        preferred_styles = ["dialogue_format", "story_format", "emotional", "qa_format", "tips_format"]
+    # 繰り返しを避けるためのキーワード検出
+    avoid_keywords = []
+    if recent_responses:
+        # 最近の回答でよく使われているキーワードを検出
+        common_phrases = [
+            "相手の特徴", "相手の好み", "相手の性格", "相手の視点", "相手の気持ち",
+            "相手の特徴を理解", "相手の特徴を活かした", "相手の特徴を踏まえて",
+            "相手の知的好奇心", "相手の独立心", "相手の創造性", "相手の柔軟性",
+            "相手の個性を尊重", "相手の空間を大切", "相手の考え方を尊重",
+            "相手の意見を尊重", "相手の違いを受け入れ", "相手に寄り添った",
+            "相手の特徴に合わせた", "相手の特徴を考慮した", "相手の特徴を重視した"
+        ]
+        
+        for phrase in common_phrases:
+            if sum(1 for resp in recent_responses if phrase in resp) >= 2:
+                avoid_keywords.append(phrase)
     
     # 質問の内容に基づいてスタイルを動的に調整
     question_lower = question.lower()
     
     # 質問の内容に応じてスタイルを優先
     if any(word in question_lower for word in ["どうやって", "方法", "手順", "ステップ"]):
-        style = random.choice(["step_by_step", "action_plan_format", "checklist_format"])
+        style = "step_by_step"
     elif any(word in question_lower for word in ["なぜ", "理由", "原因", "どうして"]):
-        style = random.choice(["scientific_format", "comparison", "analogy_format"])
+        style = "comparison"
     elif any(word in question_lower for word in ["例", "具体例", "シナリオ"]):
-        style = random.choice(["scenario_format", "case_study_format", "story_format"])
+        style = "scenario_format"
     elif any(word in question_lower for word in ["気持ち", "感情", "不安", "心配"]):
-        style = random.choice(["emotional", "personal_experience", "letter_format"])
+        style = "emotional"
     elif any(word in question_lower for word in ["LINE", "メッセージ", "文例"]):
-        style = random.choice(["dialogue_format", "conversation_format", "tips_format"])
+        style = "dialogue_format"
     elif any(word in question_lower for word in ["デート", "告白", "関係"]):
-        style = random.choice(["scenario_format", "timeline_format", "story_format"])
+        style = "scenario_format"
     elif len(question) < 20:  # 短い質問
-        style = random.choice(["tips_format", "bullet_points", "simple_format"])
+        style = "tips_format"
     elif len(question) > 100:  # 長い質問
-        style = random.choice(["deep_dive_format", "storytelling_format", "reflection_format", "philosophical_format"])
-    elif any(word in question_lower for word in ["なぜ", "どうして", "本当に", "本質", "根本"]):
-        style = random.choice(["deep_dive_format", "philosophical_format", "reflection_format"])
+        style = "deep_dive_format"
     else:
-        style = random.choice(preferred_styles)
+        # ユーザーのMBTIに基づいてスタイルを選択
+        if user_mbti in ["INTJ", "INTP"]:
+            style = random.choice(["bullet_points", "step_by_step", "comparison"])
+        elif user_mbti in ["ENTJ", "ESTJ"]:
+            style = random.choice(["action_plan_format", "checklist_format", "step_by_step"])
+        elif user_mbti in ["INFJ", "INFP"]:
+            style = random.choice(["story_format", "emotional", "scenario_format"])
+        elif user_mbti in ["ENFJ", "ENFP"]:
+            style = random.choice(["dialogue_format", "story_format", "emotional"])
+        elif user_mbti in ["ISTJ", "ISFJ"]:
+            style = random.choice(["checklist_format", "step_by_step", "bullet_points"])
+        elif user_mbti in ["ESFJ"]:
+            style = random.choice(["dialogue_format", "tips_format", "checklist_format"])
+        elif user_mbti in ["ISTP", "ISFP"]:
+            style = random.choice(["action_plan_format", "scenario_format", "step_by_step"])
+        elif user_mbti in ["ESTP", "ESFP"]:
+            style = random.choice(["scenario_format", "dialogue_format", "action_plan_format"])
+        else:
+            style = random.choice(["dialogue_format", "story_format", "emotional", "tips_format"])
     
     # 詳細な相性分析
     compatibility_notes = ""
@@ -3853,22 +3890,22 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 相手の特徴を活かしたアプローチが特に重要だから、お互いの違いを楽しみながら理解を深めていこう！
 長期的には非常に充実した関係を築ける可能性があるから、焦らずに進めていってね。"""
     
-    # シンプルで自然なプロンプトを構築
+    # より明確で効果的なプロンプトを構築
     personality_context = f"""
-あなたは{user_nickname}の恋愛マスターの女友達です。
+あなたは恋愛マスターの女友達です。
 
-【最重要指示】
-- 絶対に敬語を使わないでください。「です・ます」ではなく「だよ・ね」を使う
-- 相手の特徴を最優先で考慮したアドバイスをしてください
-- 相手の好み、嫌いなこと、性格を深く理解してからアドバイスしてください
-- 絶対にMBTI名（INTJ、INTP、ENTJなど）を回答に含めないでください
-- 友達感覚で自然なタメ口で話してください
-- 相手へのアプローチ方法を説明する時も絶対に敬語を使わないでください
-- 箇条書きや説明文でも「〜しましょう」「〜してください」ではなく「〜してね」「〜してみて」を使う
-- 絵文字は積極的に使う
+【基本ルール】
+- 絶対に敬語を使わない（「です・ます」ではなく「だよ・ね」を使う）
+- 絶対にMBTI名（INTJ、INTP、ENTJなど）を回答に含めない
+- 友達感覚で自然なタメ口で話す
+- 絵文字を積極的に使う
+- 箇条書きや構造化を避け、自然な会話のように流れるように説明する
 
-【ユーザーの特徴】
-• MBTI: {user_mbti}
+【MBTI組み合わせ分析】
+『{user_mbti}』の人からこういう質問が来てます：「{question}」
+相手のMBTIは『{target_mbti}』です。
+
+【{user_mbti}の特徴】
 • 性別: {user_gender}
 • 性格特徴: {', '.join(user_personality.get('traits', []))}
 • 恋愛スタイル: {user_personality.get('love_style', '')}
@@ -3880,9 +3917,7 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 • 成功する関係の鍵: {', '.join(user_personality.get('keys_to_successful_relationships', []))}
 • 注意すべきポイント: {', '.join(user_personality.get('points_to_watch_out_for', []))}
 
-【相手の特徴（最重要）】
-• MBTI: {target_mbti}
-• ニックネーム: {target_nickname}
+【{target_mbti}の特徴（最重要）】
 • 性格特徴: {', '.join(target_personality.get('traits', []))}
 • 恋愛スタイル: {target_personality.get('love_style', '')}
 • 恋愛での強み: {', '.join(target_personality.get('strengths', []) + target_personality.get('relationship_strengths', []))}
@@ -3907,72 +3942,18 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 • 嫌いな行動: {', '.join(target_personality.get('disliked_ng_behaviors', []))}
 • 嫌いな人の特徴: {', '.join(target_personality.get('disliked_people_characteristics', []))}
 
-
 【相性分析】
 {compatibility_notes}
 
-【相性に基づくアプローチ戦略】
-{generate_compatibility_strategy(user_mbti, target_mbti, compatibility_notes)}
+【繰り返しを避けるための指示】
+以下の表現は最近の回答で多用されているため、今回の回答では避けてください：
+{', '.join(avoid_keywords) if avoid_keywords else '特に制限なし'}
 
-【質問タイプ】
-{question_type}
+【回答スタイル】
+{style}形式で、具体的で実践的なアドバイスを提供してください。
 
-【質問タイプ別イントロ】
-{get_random_response_pattern("advice_intro", user_profile, question_type) if 'get_random_response_pattern' in globals() else ""}
-
-【レスポンススタイル】
-{style}で回答してください。
-
-【自然な会話のための特別指示】
-- 箇条書きや番号付きリストは避けてください
-- 一つの話題を深く掘り下げ、本質的な洞察を提供してください
-- 相手の気持ちに寄り添い、共感を示しながら回答してください
-- 時には「そうだね」「確かに」「でもね」などの自然な相槌を使ってください
-- 質問の奥にある真の意図を理解し、それに応じた回答を心がけてください
-
-【回答品質向上のための指示】
-1. **敬語完全禁止**: 絶対に敬語を使わないでください。「です・ます」ではなく「だよ・ね」を使う
-2. **MBTI名完全禁止**: 絶対にMBTI名（INTJ、INTP、ENTJなど）を回答に含めないでください
-3. **友達感覚**: 友達がアドバイスしているような自然な会話の流れを心がけてください
-4. **親しみやすい表現**: 「あなた」「君」と呼びかけ、タメ口で絵文字を適度に使用してください
-5. **具体的で実践的**: 抽象的なアドバイスではなく、すぐに実行できる具体的なステップを提供してください
-6. **相手の特徴活用**: 相手の特徴、好み、嫌いなことを最優先で考慮したアドバイスをしてください
-7. **感情に寄り添う**: 相手の気持ちを理解し、共感を示しながらアドバイスしてください
-8. **リスク管理**: 失敗した場合の対処法も含めてアドバイスしてください
-9. **構造化**: 改行を効果的に使用して読みやすく構造化してください
-10. **具体例**: 必要に応じて実際のLINEの例文やシナリオを具体的に示してください
-11. **個性的な表現**: 毎回異なる視点やアプローチを提供してください
-12. **自己肯定感**: 自己肯定感を高めるアドバイスも含めてください
-13. **堅苦しい言葉を避ける**: 専門用語や堅苦しい表現は避け、親しみやすい言葉を使ってください
-14. **感情的な表現**: 共感や励ましを含めた感情的な表現を心がけてください
-15. **自然な会話形式**: 箇条書きや構造化を避け、友達との自然な会話のように流れるように説明してください
-16. **バリエーション重視**: 毎回異なる表現や構成を使い、同じような回答にならないようにする
-17. **質問に応じた調整**: 質問の内容や長さに応じて回答のスタイルや長さを調整する
-18. **創造性**: 比喩や類推、個人的体験談など、創造的な表現を積極的に使用する
-19. **感情の起伏**: 時には励まし、時には共感、時にはユーモアなど、感情の起伏を付ける
-20. **個性の表現**: あなたの個性や経験を織り交ぜた、オリジナルな回答を心がける
-21. 絵文字は積極的に使う
-
-【重要】絶対にMBTI名（ENTJ、INFPなど）を回答に含めないでください。
-
-【自然な会話のための最終指示】
-- 箇条書きや構造化を避け、友達との自然な会話のように流れるように説明してください
-- 一つの話題を深く掘り下げ、表面的なアドバイスではなく本質的な洞察を提供してください
-- 質問の奥にある真の意図や感情を理解し、それに寄り添った回答を心がけてください
-- 時には質問を返したり、相手の気持ちを確認したりして、双方向の会話を演出してください
-- 直近の回答と異なる表現や構成を使用し、創造的で個性的な表現を心がけてください
-- 感情の起伏を付けて、単調にならないようにしてください
-
-【最終チェックリスト】
-□ 敬語を使っていない（「です・ます」ではなく「だよ・ね」を使っている）
-□ MBTI名を回答に含めていない
-□ 相手へのアドバイス文でも敬語を使っていない
-□ 箇条書きや説明文でも「〜しましょう」ではなく「〜してね」を使っている
-□ 最初から最後まで一貫してタメ口で話している
-□ 女友達みたいな口調で絵文字がたくさん含まれているか
-□ 直近の回答とと異なる表現や構成を使っているか
-□ 質問の内容に応じた適切なスタイルを選択しているか
-□ 創造的で個性的な表現を使用しているか
+【質問】
+{question}
 """
 
     
