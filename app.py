@@ -2994,7 +2994,13 @@ def classify_intent(message):
             print("⚠️ OpenAI APIキーが設定されていません")
             return 9  # デフォルトは「その他」
         
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.8,            # 柔らかく多様な表現に
+            frequency_penalty=0.7,      # 同じ表現を避ける
+            presence_penalty=0.6,       # 新しい話題を促す
+            openai_api_key=openai_api_key
+        )
         prompt = (
             "Classify the following message into one of these categories:\n"
             "1: Greeting (hello, hi, good morning, good evening, こんにちは, こんばんは, おはよう, おやすみ, おはよ, etc.)\n"
@@ -3029,7 +3035,13 @@ def classify_question_type(question):
             print("⚠️ OpenAI APIキーが設定されていません")
             return 9  # デフォルトは「一般的な相談」
         
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.8,            # 柔らかく多様な表現に
+            frequency_penalty=0.7,      # 同じ表現を避ける
+            presence_penalty=0.6,       # 新しい話題を促す
+            openai_api_key=openai_api_key
+        )
         prompt = (
             "以下の質問を最も適切なカテゴリに分類してください：\n"
             "1: 方法論・アプローチ (どうやって、どのように、方法、アプローチ、戦略)\n"
@@ -3214,7 +3226,13 @@ def handle_emotional_support(user_id, message, user_profile):
             print("⚠️ OpenAI APIキーが設定されていません")
             return "つらかったね💕 あなたの気持ち、よくわかるよ✨"
         
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.8,            # 柔らかく多様な表現に
+            frequency_penalty=0.7,      # 同じ表現を避ける
+            presence_penalty=0.6,       # 新しい話題を促す
+            openai_api_key=openai_api_key
+        )
         prompt = (
             f"あなたはMBTI診断ベースの女性の恋愛マスターの友達だよ。\n"
             f"ユーザー情報: あなたのMBTI: {user_profile.get('mbti', '不明')}, あなたの性別: {user_profile.get('gender', '不明')}\n"
@@ -3238,7 +3256,13 @@ def handle_casual_chat(user_id, message, user_profile):
             print("⚠️ OpenAI APIキーが設定されていません")
             return "うん、そうだね！😊"
         
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.8,            # 柔らかく多様な表現に
+            frequency_penalty=0.7,      # 同じ表現を避ける
+            presence_penalty=0.6,       # 新しい話題を促す
+            openai_api_key=openai_api_key
+        )
         prompt = (
             f"あなたはMBTI診断ベースの女性の恋愛マスターの友達だよ。\n"
             f"ユーザー情報: あなたのMBTI: {user_profile.get('mbti', '不明')}, あなたの性別: {user_profile.get('gender', '不明')}\n"
@@ -3729,7 +3753,13 @@ def ask_ai_with_vector_db(user_id, question, user_profile, question_type="一般
             print("⚠️ OpenAI APIキーが設定されていません")
             return "ごめんね、AI機能が一時的に利用できないよ😅 しばらく待ってから再度お試ししてね！"
         
-        llm = ChatOpenAI(openai_api_key=openai_api_key)
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.8,            # 柔らかく多様な表現に
+            frequency_penalty=0.7,      # 同じ表現を避ける
+            presence_penalty=0.6,       # 新しい話題を促す
+            openai_api_key=openai_api_key
+        )
         
         # パーソナライズされたアドバイスコンテキストを生成
         personality_context = generate_personalized_advice(user_profile, question, history, question_type)
@@ -3902,8 +3932,12 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 - 箇条書きや構造化を避け、自然な会話のように流れるように説明する
 
 【MBTI組み合わせ分析】
-『{user_mbti}』の人からこういう質問が来てます：「{question}」
-相手のMBTIは『{target_mbti}』です。
+『{user_mbti}』のあなたと『{target_mbti}』の相手における恋愛アドバイスを以下の3点で提示して：
+① 相性の特徴と関係性
+② 効果的なLINEメッセージ例（3つ）
+③ 注意すべきNG行動
+
+できるだけ具体的に。親しみやすくて柔らかい表現で。
 
 【{user_mbti}の特徴】
 • 性別: {user_gender}
