@@ -3867,18 +3867,52 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 - 箇条書きや説明文でも「〜しましょう」「〜してください」ではなく「〜してね」「〜してみて」を使う
 - 絵文字は積極的に使う
 
-【ユーザーの参考情報（MBTI）】
-- MBTI: {user_mbti}
-- 相手のMBTI: {target_mbti}
-- あなたの性別: {user_gender}
-- 自分の傾向: {user_personality.get('personality', '魅力的で個性的')}（参考）
+【ユーザーの特徴】
+• MBTI: {user_mbti}
+• 性別: {user_gender}
+• 性格特徴: {', '.join(user_personality.get('traits', []))}
+• 恋愛スタイル: {user_personality.get('love_style', '')}
+• 恋愛での強み: {', '.join(user_personality.get('strengths', []) + user_personality.get('relationship_strengths', []))}
+• 恋愛での弱み: {', '.join(user_personality.get('challenges', []) + user_personality.get('relationship_challenges', []))}
+• 関係の障害: {', '.join(user_personality.get('relationship_hurdles', []))}
+• 自分のアプローチ方法: {', '.join(user_personality.get('my_approaches', []))}
+• 理想のパートナーの特徴: {', '.join(user_personality.get('desired_partner_traits', []))}
+• 成功する関係の鍵: {', '.join(user_personality.get('keys_to_successful_relationships', []))}
+• 注意すべきポイント: {', '.join(user_personality.get('points_to_watch_out_for', []))}
 
-【相手の参考情報】
--　MBTI: {target_mbti}
-- 相手の傾向: {target_personality.get('personality', '魅力的で個性的')}（参考）
+【相手の特徴（最重要）】
+• MBTI: {target_mbti}
+• ニックネーム: {target_nickname}
+• 性格特徴: {', '.join(target_personality.get('traits', []))}
+• 恋愛スタイル: {target_personality.get('love_style', '')}
+• 恋愛での強み: {', '.join(target_personality.get('strengths', []) + target_personality.get('relationship_strengths', []))}
+• 恋愛での弱み: {', '.join(target_personality.get('challenges', []) + target_personality.get('relationship_challenges', []))}
+• 関係の障害: {', '.join(target_personality.get('relationship_hurdles', []))}
+• このタイプにやってはいけない行動: {', '.join(user_personality.get('ng_behaviors', []))}
+• このタイプと距離を縮める方法: {', '.join(user_personality.get('how_to_close_distance', []))}
+• 好きな異性のタイプ: {', '.join(target_personality.get('likes_in_partner', []))}
+• 苦手な異性のタイプ: {', '.join(target_personality.get('dislikes_in_partner', []))}
+• このタイプの人へのアプローチ方法: {', '.join(target_personality.get('partner_approaches', []))}
+• このタイプの人へのNGアプローチ: {', '.join(target_personality.get('partner_ng_behaviors', []))}
+• 好きなデート: {', '.join(target_personality.get('favorite_dates', []))}
+• LINEの傾向: {', '.join(target_personality.get('line_tendencies', []))}
+• LINEメッセージテンプレート: {', '.join(target_personality.get('line_message_templates', []))}
+• LINEの例: {', '.join(target_personality.get('line_examples', []))}
+• 脈ありサイン: {', '.join(target_personality.get('romantic_signs', []))}
+• デート誘い文句例: {', '.join(target_personality.get('date_invitations', []))}
+• 告白の言葉例: {', '.join(target_personality.get('confession_examples', []))}
+• 効果的な告白のタイミング: {target_personality.get('confession_timing', '')}
+• 告白のポイント: {', '.join(target_personality.get('key_points_for_confession', []))}
+• 告白のNGポイント: {', '.join(target_personality.get('ng_points_for_confession', []))}
+• 嫌いな行動: {', '.join(target_personality.get('disliked_ng_behaviors', []))}
+• 嫌いな人の特徴: {', '.join(target_personality.get('disliked_people_characteristics', []))}
 
-【相性参考情報】
-{compatibility_notes if compatibility_notes else "相性情報は参考程度にしてください"}
+
+【相性分析】
+{compatibility_notes}
+
+【相性に基づくアプローチ戦略】
+{generate_compatibility_strategy(user_mbti, target_mbti, compatibility_notes)}
 
 【質問タイプ】
 {question_type}
@@ -3889,7 +3923,7 @@ def generate_personalized_advice(user_profile, question, history, question_type=
 【レスポンススタイル】
 {style}で回答してください。
 
-【チャットGPTのような自然な会話のための指示】
+【自然な会話のための特別指示】
 - 箇条書きや番号付きリストは避けてください
 - 一つの話題を深く掘り下げ、本質的な洞察を提供してください
 - 相手の気持ちに寄り添い、共感を示しながら回答してください
